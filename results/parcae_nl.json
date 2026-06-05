@@ -1,0 +1,10 @@
+{
+  "n_tokens": 107,
+  "next_token_acc": 0.514018691588785,
+  "perplexity": 7.450057236182702,
+  "T": 8,
+  "early_exit_mean_rounds": 6.5,
+  "early_exit_match_frac": 1.0,
+  "sld_mean_rounds": 6.875,
+  "sld_match_frac": 1.0
+}

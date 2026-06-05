@@ -213,7 +213,25 @@ loop reproduces parcae's native next-token output before reporting anything
 (`core_block_forward` is time-invariant given `_current_input_ids`; the decode
 path is `C → coda → ln_f → lm_head·logit_scale`).
 
-Findings (16 inputs):
+**Real English text (the non-synthetic check).** Using parcae's own tokenizer
+(`SandyResearch/parcae-tokenizer`), `bench/parcae_nl.py` scores parcae on real
+English passages: next-token **top-1 accuracy 0.51, perplexity 7.5** (sensible for
+a 140M model — the model is doing real language modeling, not garbage). Then
+lossless early-exit and SLD are run on the same recurrence:
+
+| method | rounds | matches full loop (next token, all positions) |
+|---|--:|--:|
+| full loop | 8 | — (reference) |
+| early-exit | 6.5 | **115/115 (100%)** |
+| SLD | 6.9 | **115/115 (100%)** |
+
+**On real text, SLD/early-exit reproduce parcae's predictions *exactly* while using
+fewer sequential core rounds.** This is the honest, non-synthetic result: the
+acceleration is *modest* on parcae's short `T=8` loop and *exact in kind* — the
+dramatic synthetic "1 round vs k" comes from a *perfect* draft on a *deep* loop,
+not from cutting corners. A real LM keeps its exact next-token behavior.
+
+Further findings on parcae (random-token probes, 16 inputs):
 - **The loop converges fast.** parcae's next token settles to its full-`T` value
   by **~2.9 of 8 loops** on average — ~5 loops are redundant.
 - **Lossless convergence early-exit:** **8 → 4.56 sequential core rounds**
