@@ -41,6 +41,8 @@ k=12 |OO###################.......   full=12  SLD=1
 k=16 |OO##########################   full=16  SLD=1
 ```
 
+![SLD frontier: rounds vs depth, and wall-clock speedup vs depth](results/frontier_main.png)
+
 The headline: **full-loop sequential core rounds grow linearly with depth `k`;
 SLD stays at one round** (a single batched verification swallows the whole
 trajectory), while remaining exactly lossless. The batch-1 wall-clock speedup
