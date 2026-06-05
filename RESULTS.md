@@ -225,11 +225,30 @@ lossless early-exit and SLD are run on the same recurrence:
 | early-exit | 6.5 | **115/115 (100%)** |
 | SLD | 6.9 | **115/115 (100%)** |
 
-**On real text, SLD/early-exit reproduce parcae's predictions *exactly* while using
-fewer sequential core rounds.** This is the honest, non-synthetic result: the
-acceleration is *modest* on parcae's short `T=8` loop and *exact in kind* — the
-dramatic synthetic "1 round vs k" comes from a *perfect* draft on a *deep* loop,
-not from cutting corners. A real LM keeps its exact next-token behavior.
+**Per single recurrence step, SLD/early-exit reproduce parcae's predictions exactly**
+(115/115 positions) while using fewer sequential core rounds. And it is *legible*
+— `bench/parcae_generate.py` greedy-generates and **decodes to English**:
+
+```
+"The capital of France is" -> " Paris. It is the capital of the French Republic,
+                                the largest country in Europe, and the largest"
+"Water is made of"         -> " water molecules. Water molecules are made up of
+                                water, hydrogen, oxygen, carbon, nitrogen, and"
+```
+SLD reproduces these at ~5.2/8 core rounds per token, **exactly on 3/4 prompts
+(63/80 tokens)**.
+
+**The honest boundary (this is the important part).** Exact losslessness is a
+property of the *synthetic, discrete-readout* task: re-anchoring snaps the carried
+state back onto the trajectory manifold, so acceptance on the argmax symbol is
+bit-stable. A *real LM has continuous state with no discrete sufficient statistic*,
+so SLD there is **near-lossless, not exact** — per single recurrence it is ~100%,
+but over many autoregressive steps the fixed-point-acceptance heuristic can accept
+slightly early and the divergence compounds (3/4 generations exact above). This is
+exactly why the synthetic numbers are dramatic and the real-LM numbers are modest:
+**dramatic+exact is the discrete synthetic regime; a real model is modest+near-
+lossless.** Closing that gap on a real LM is future work (a learned draft + a
+tighter/exact verification), and is the natural next step on GPU.
 
 Further findings on parcae (random-token probes, 16 inputs):
 - **The loop converges fast.** parcae's next token settles to its full-`T` value
