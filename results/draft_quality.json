@@ -1,0 +1,51 @@
+[
+  {
+    "p": 0.0,
+    "sym_acc": 1.0,
+    "mean_accept": 16.0,
+    "sld_rounds": 1.0,
+    "lossless": 1.0
+  },
+  {
+    "p": 0.1,
+    "sym_acc": 0.8994140625,
+    "mean_accept": 7.312449799196787,
+    "sld_rounds": 2.431640625,
+    "lossless": 1.0
+  },
+  {
+    "p": 0.2,
+    "sym_acc": 0.800537109375,
+    "mean_accept": 4.071027082268778,
+    "sld_rounds": 3.822265625,
+    "lossless": 1.0
+  },
+  {
+    "p": 0.3,
+    "sym_acc": 0.7034912109375,
+    "mean_accept": 2.3822996010155966,
+    "sld_rounds": 5.384765625,
+    "lossless": 1.0
+  },
+  {
+    "p": 0.5,
+    "sym_acc": 0.5137939453125,
+    "mean_accept": 1.0854885057471264,
+    "sld_rounds": 8.15625,
+    "lossless": 1.0
+  },
+  {
+    "p": 0.7,
+    "sym_acc": 0.325439453125,
+    "mean_accept": 0.4667361472989404,
+    "sld_rounds": 11.244140625,
+    "lossless": 1.0
+  },
+  {
+    "p": 1.0,
+    "sym_acc": 0.02978515625,
+    "mean_accept": 0.0349482715114812,
+    "sld_rounds": 15.48046875,
+    "lossless": 1.0
+  }
+]

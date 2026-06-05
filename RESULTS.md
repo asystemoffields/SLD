@@ -165,7 +165,31 @@ quality a GPU run (or a pretrained looped LM) would provide. This is the most
 concrete argument for the GPU/parcae "v2": the bottleneck here is teacher
 capacity, not the SLD mechanism.
 
-## 9. Honest scope & limitations
+## 9. Draft quality is the only knob (always lossless)
+
+`bench/draft_quality.py` corrupts a controlled fraction `p` of the trained draft's
+predicted symbols and sweeps `p` from 0 (the learned draft) to 1 (random = the
+blind control), at `k=16`. Verification makes the answer correct at every `p`; a
+worse draft costs only *rounds*, never *accuracy*:
+
+| draft corruption `p` | draft sym-acc | mean accept | SLD rounds | lossless |
+|--:|--:|--:|--:|:--:|
+| 0.0 | 1.000 | 16.0 | **1.0** | ✓ |
+| 0.1 | 0.899 | 7.3 | 2.4 | ✓ |
+| 0.2 | 0.801 | 4.1 | 3.8 | ✓ |
+| 0.3 | 0.703 | 2.4 | 5.4 | ✓ |
+| 0.5 | 0.514 | 1.1 | 8.2 | ✓ |
+| 0.7 | 0.325 | 0.5 | 11.2 | ✓ |
+| 1.0 | 0.030 | 0.03 | 15.5 ≈ full loop | ✓ |
+
+SLD degrades **smoothly from one round to the full loop** as the draft worsens,
+and is **exactly lossless throughout**. The speedup is governed entirely by draft
+acceptance — which is exactly the lever a stronger draft (more capacity/training,
+as a GPU affords, or a draft tuned to a real model's loop) turns toward bigger
+wins. It also makes the safety property concrete: a bad or out-of-distribution
+draft can never hurt the answer, only the speed.
+
+## 10. Honest scope & limitations
 
 - **Discrete-readout regime.** Losslessness is rigorous because acceptance is on
   the argmax symbol and the symbolic recurrence is readout-Markov; re-anchoring
