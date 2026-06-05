@@ -14,7 +14,7 @@ def code(t): cells.append({"cell_type": "code", "metadata": {}, "execution_count
 
 
 md(r"""
-# SLD on parcae — real NL evals, head-to-head (GPU)
+# SLD on parcae — NL evals, head-to-head (GPU)
 
 **Speculative Looped Decoding (SLD)** accelerates a looped / recurrent-depth
 transformer by detecting when its shared-core recurrence has converged and skipping
