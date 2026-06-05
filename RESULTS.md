@@ -209,6 +209,23 @@ Findings (16 inputs):
 - A verified fixed-point (Anderson) SLD reaches the same answers at 5.56 rounds,
   15/16 lossless.
 
+**Redundancy grows with configured depth.** Running parcae beyond its trained
+recurrence (it supports any `T` via `num_steps_pair`) shows the skippable depth
+grows with the configured loop count — the next token stabilizes well before the
+end even out-of-distribution:
+
+| configured loops `T` | mean settle loop | redundant loops |
+|--:|--:|--:|
+| 4  | 2.3 | 1.7 |
+| 8  | 3.2 | 4.8 |
+| 16 | 7.8 | 8.2 |
+| 32 | 9.8 | **22.2** |
+
+At `T=32`, ~22 of 32 loops are redundant. (The settle point drifts later at
+out-of-distribution depths since the model was trained at `T=8`; still, the
+skippable headroom grows.) Deep recurrent-depth LMs — Huginn unrolls 32–132 —
+are therefore exactly where a lossless depth-skipper has the most to gain.
+
 **Honest reading.** On parcae's *short* `T=8`, fast-converging loop, *sequential*
 early-exit already captures the headroom on CPU; the extrapolation draft doesn't
 beat it here. SLD's distinct advantage is (a) verifying several depths **in
