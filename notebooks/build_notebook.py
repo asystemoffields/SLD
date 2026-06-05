@@ -88,8 +88,11 @@ for n, m in parcae.named_modules():
     handles.append(m.register_forward_hook((lambda nm: (lambda *_: counts.update([nm])))(n)))
 with torch.no_grad(): parcae(torch.randint(0, 1000, (1, 8), device=DEV))
 for h in handles: h.remove()
-core_candidates = [n for n, c in counts.items() if c == T_LOOPS and n]
-print("modules called exactly", T_LOOPS, "times:", core_candidates[:8])
+# the recurrent core (and its descendants) are the modules called exactly T times;
+# the OUTERMOST such module (shallowest path) is the looped unit we want.
+core_candidates = sorted([n for n, c in counts.items() if c == T_LOOPS and n],
+                         key=lambda n: (n.count("."), len(n)))
+print("modules called exactly", T_LOOPS, "times (shallowest first):", core_candidates[:8])
 """)
 
 md(r"""
@@ -103,7 +106,7 @@ next-token argmax. If it fails, set `CORE_NAME` or switch the injection model.
 """)
 
 code(r'''
-CORE_NAME = core_candidates[-1] if core_candidates else None   # deepest match; override if needed
+CORE_NAME = core_candidates[0] if core_candidates else None    # outermost looped unit; override if needed
 assert CORE_NAME, "Could not auto-find the recurrent core; set CORE_NAME to the module looped T times."
 core = dict(parcae.named_modules())[CORE_NAME]
 print("recurrent core:", CORE_NAME, type(core).__name__)
