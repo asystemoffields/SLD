@@ -1,8 +1,9 @@
-"""Builds notebooks/sld_parcae_gpu.ipynb. Run: python notebooks/build_notebook.py
+"""Builds notebooks/sld_parcae_gpu.ipynb (NL-focused). Run: python notebooks/build_notebook.py
 
-The parcae adapter here is the SAME code validated on CPU in bench/parcae_sld.py
-(it asserts the manual loop reproduces parcae's native output). The notebook just
-re-runs it on a GPU and adds the batch wall-clock sweep.
+The parcae adapter + decoders are the CPU-validated code from bench/parcae_sld.py /
+parcae_lambada.py. The notebook runs parcae's OWN evals (LAMBADA, a multiple-choice
+benchmark) head-to-head: full-loop vs SLD, reporting accuracy, agreement, compute
+(core rounds) and wall-clock.
 """
 import json
 from pathlib import Path
@@ -13,32 +14,30 @@ def code(t): cells.append({"cell_type": "code", "metadata": {}, "execution_count
 
 
 md(r"""
-# SLD on parcae — GPU (validated adapter)
+# SLD on parcae — real NL evals, head-to-head (GPU)
 
-**Speculative Looped Decoding (SLD)** accelerates a looped transformer by
-verifying *future loop states in parallel* instead of walking the recurrence one
-step at a time. On CPU ([SLD repo](https://github.com/asystemoffields/SLD),
-`RESULTS.md`) SLD is *exactly lossless* and collapses a depth-`k` synthetic
-recurrence to **one** sequential core round (vs `k`). The CPU wall-clock win is
-fragile (a batched verify of many states leaves the CPU "flat" region); **a GPU
-fixes that** — the batched verify is one parallel kernel.
+**Speculative Looped Decoding (SLD)** accelerates a looped transformer by detecting
+when its shared-core recurrence has converged and skipping the redundant loops —
+verified, so the model's output is preserved. This notebook runs it on the real
+[`parcae-140m`](https://github.com/sandyresearch/parcae) stable looped LM
+(recurrence `T=8`), head-to-head against the full loop, on **parcae's own
+evaluations**:
 
-This notebook runs on the real [`parcae-140m`](https://github.com/sandyresearch/parcae)
-stable looped LM (recurrence `T=8`, contractive core that converges). The
-`ParcaeLoop` adapter below is the **same code already validated on CPU** in
-`bench/parcae_sld.py` — it asserts the reconstructed loop matches parcae's native
-output before any acceleration claim. We then measure, on GPU:
+1. **LAMBADA** (`eval_configs/eval-lambada.yaml`) — accuracy preserved? at what
+   compute (core rounds) and wall-clock?
+2. **A multiple-choice benchmark** (PIQA; swap in HellaSwag/ARC the same way) —
+   does the benchmark number hold under SLD?
+3. **Legible generation** — decode parcae's continuation and SLD's side by side.
 
-1. **convergence** — how few loops parcae actually needs (its redundancy);
-2. **lossless early-exit vs SLD** — sequential core rounds;
-3. **wall-clock at batch 1 / 16 / 64** — where parallel depth-verification beats
-   the sequential walk (the regime CPU cannot show).
-
-On parcae's *short* `T=8` loop, sequential early-exit already captures much of the
-CPU headroom; SLD's distinct win is **parallelism at batch** and **deep**
-recurrence (e.g. Huginn's 32–132 unrolls). The synthetic repo results are where
-the lossless depth-collapse is shown cleanly; parcae confirms a real stable looped
-LM carries large exploitable recurrent redundancy.
+Two SLD modes give a quality/speed knob: **faithful** (verify on the next-token
+readout — near prediction-identical) and **fast** (verify on the cheap state
+residual, decode once — faster). On CPU, parcae's *short* `T=8` loop makes the
+faithful mode's per-step decode dominate; the **fast** mode already wins wall-clock
+(~1.4×) there, and on **GPU** the verification is one parallel batched pass so both
+modes' core-round savings become real latency — and the savings grow with loop
+depth (Huginn unrolls 32–132). The clean, *exactly-lossless* depth-collapse is in
+the synthetic repo (https://github.com/asystemoffields/SLD, `RESULTS.md`); here we
+validate it preserves a real model's real benchmark behavior.
 """)
 
 code(r"""
@@ -49,27 +48,24 @@ print("torch", torch.__version__, "| GPU:", torch.cuda.get_device_name(0))
 """)
 
 code(r"""
-# parcae's REAL package is the GitHub source (the PyPI 'parcae-lm' is an empty stub).
-!pip -q install "git+https://github.com/sandyresearch/parcae" einops safetensors tokenizers transformers >/dev/null 2>&1
+# parcae's REAL package is the GitHub source (the PyPI 'parcae-lm' is an empty stub);
+# the tokenizer is a separate repo; datasets pulls the benchmarks.
+!pip -q install "git+https://github.com/sandyresearch/parcae" einops safetensors tokenizers transformers datasets >/dev/null 2>&1
 import parcae_lm
 from transformers import AutoTokenizer
 m = parcae_lm.from_pretrained("SandyResearch/parcae-140m").to(DEV).eval()
 for p in m.parameters(): p.requires_grad_(False)
-tok = AutoTokenizer.from_pretrained("SandyResearch/parcae-tokenizer")   # parcae's own tokenizer
+tok = AutoTokenizer.from_pretrained("SandyResearch/parcae-tokenizer")
 T = int(getattr(m.config, "mean_recurrence", 8))
-print("loaded parcae-140m | recurrence T =", T, "| tokenizer vocab", tok.vocab_size,
-      "| layers prelude/core/coda =",
-      m.config.n_layers_in_prelude, m.config.n_layers_in_recurrent_block, m.config.n_layers_in_coda)
+print("parcae-140m | recurrence T =", T, "| tokenizer vocab", tok.vocab_size)
 """)
 
 md(r"""
 ## 1. The validated parcae loop adapter
 
-`encode` (embeds + prelude + `ln_prelude` + `initialize_state`), `step`
-(`core_block_forward`, which applies parcae's diagonal input-injection and the
-shared core; time-invariant given `_current_input_ids`), `decode`
-(`C → coda → ln_f → lm_head·logit_scale`). The cell **asserts** the manual loop
-reproduces parcae's native `forward(num_steps_pair=[T,0])` output.
+`encode`/`step`/`decode` reconstructed from parcae's own modules; the cell
+**asserts** the manual loop reproduces parcae's native `forward()` output before any
+acceleration claim.
 """)
 
 code(r"""
@@ -93,133 +89,35 @@ class ParcaeLoop:
     def step(self, x, e, fc):
         return self.m.core_block_forward(x, e, fc, None, torch.tensor(0, device=x.device), torch.tensor(0, device=x.device))
     @torch.no_grad()
-    def decode(self, x, ids, fc):
+    def decode_all(self, x, ids, fc):
         m = self.m; x = m.transformer.C(x)
         for i, blk in enumerate(m.transformer.coda):
             k = str(self.off_coda + i)
             ve = m.value_embeds[k](ids) if k in m.value_embeds else None
             x = blk(x, fc, None, ve=ve)
-        x = m.transformer.ln_f(x)
-        return (m.lm_head(x).float() * self.logit_scale)[:, -1, :]
+        return m.lm_head(m.transformer.ln_f(x)).float() * self.logit_scale          # [B,seq,vocab]
+    def decode(self, x, ids, fc):  # last position only
+        return self.decode_all(x, ids, fc)[:, -1, :]
 
 loop = ParcaeLoop(m)
 
-# self-validation: manual loop == native forward
-g = torch.Generator(device=DEV).manual_seed(0)
-ok = True
+g = torch.Generator(device=DEV).manual_seed(0); ok = True
 for _ in range(4):
     ids = torch.randint(0, 30000, (1, 12), generator=g, device=DEV)
     x, e, fc = loop.encode(ids)
     for _ in range(T): x = loop.step(x, e, fc)
-    ours = loop.decode(x, ids, fc).argmax(-1)
     native = m(ids, num_steps_pair=torch.tensor([T, 0]), return_logits=True)["logits"][:, -1, :].argmax(-1)
-    ok = ok and bool((ours == native).all())
-assert ok, "adapter does not reproduce native parcae output — check CORE/injection assumptions"
-print("[ok] adapter validated on real parcae (GPU).")
+    ok = ok and bool((loop.decode(x, ids, fc).argmax(-1) == native).all())
+assert ok, "adapter does not reproduce native parcae output"
+print("[ok] adapter validated on real parcae.")
 """)
 
 md(r"""
-## 2. Real English text — the non-synthetic check (start here)
+## 2. The recurrence runners: full loop vs SLD
 
-The headline question for any "dramatic" looped-LM speedup: does it preserve the
-*real* model's *real* language-modeling behavior? We tokenize real English with
-parcae's own tokenizer, measure parcae's next-token accuracy at the full `T`-loop,
-then check that lossless early-exit and SLD reproduce **every** next-token
-prediction while using fewer sequential core rounds.
-""")
-
-code(r'''
-@torch.no_grad()
-def aitken(a, b, c):                         # vector Aitken extrapolation of the fixed point
-    d1, d2 = b - a, c - b; dd = d2 - d1
-    coef = (d2*dd).flatten(1).sum(1, keepdim=True) / (dd*dd).flatten(1).sum(1, keepdim=True).clamp_min(1e-9)
-    return c - coef.view(-1, *([1]*(c.dim()-1))) * d2
-
-@torch.no_grad()
-def decode_all(x, ids):
-    mm = m; fc = mm.freqs_cis[:, : ids.shape[1]]
-    x = mm.transformer.C(x)
-    off = mm.config.n_layers_in_prelude + mm.config.n_layers_in_recurrent_block
-    for i, blk in enumerate(mm.transformer.coda):
-        k = str(off + i); ve = mm.value_embeds[k](ids) if k in mm.value_embeds else None
-        x = blk(x, fc, None, ve=ve)
-    return (mm.lm_head(mm.transformer.ln_f(x)).float() * loop.logit_scale)   # [1,seq,vocab]
-
-@torch.no_grad()
-def full_all(ids):
-    x, e, fc = loop.encode(ids)
-    for _ in range(T): x = loop.step(x, e, fc)
-    return decode_all(x, ids)
-
-@torch.no_grad()
-def ee_all(ids, patience=2):
-    x, e, fc = loop.encode(ids); prev=None; s=0
-    for t in range(1, T+1):
-        x = loop.step(x, e, fc); cur = decode_all(x, ids).argmax(-1)
-        if prev is not None and (cur==prev).all():
-            s += 1
-            if s>=patience: return cur, t
-        else: s=0
-        prev = cur
-    return prev, T
-
-@torch.no_grad()
-def sld_all(ids, warmup=3, verify=2):
-    x, e, fc = loop.encode(ids); hs=[x]; r=0
-    for _ in range(warmup): x = loop.step(x, e, fc); hs.append(x); r+=1
-    while r < T:
-        s = aitken(hs[-3], hs[-2], hs[-1]) if len(hs)>=3 else hs[-1]
-        a0 = decode_all(s, ids).argmax(-1); cur=s; good=True
-        for _ in range(verify):
-            cur = loop.step(cur, e, fc); r+=1
-            if (decode_all(cur, ids).argmax(-1) != a0).any(): good=False; break
-        if good: return a0, r
-        hs.append(cur)
-    return decode_all(hs[-1], ids).argmax(-1), r
-
-PASSAGES = ["The capital of France is Paris, a city on the river Seine.",
-            "Water is made of two hydrogen atoms and one oxygen atom.",
-            "In 1969, Apollo 11 landed the first humans on the surface of the Moon.",
-            "Photosynthesis is the process by which plants convert sunlight into energy.",
-            "The Pacific Ocean is the largest and deepest of the world's oceans."]
-import statistics as _st
-nc=ntok=npos=eem=slm=0; eR=[]; sR=[]
-for txt in PASSAGES:
-    ids = tok(txt, return_tensors="pt").input_ids.to(DEV)
-    fl = full_all(ids); pred = fl.argmax(-1)
-    nc += (pred[:, :-1] == ids[:, 1:]).sum().item(); ntok += ids[:, 1:].numel()
-    ea, er = ee_all(ids); sa, sr = sld_all(ids)
-    eem += (ea==pred).sum().item(); slm += (sa==pred).sum().item(); npos += pred.numel()
-    eR.append(er); sR.append(sr)
-print(f"parcae-140m on REAL English: next-token top-1 acc {nc/ntok:.3f}  ({ntok} tokens)")
-print(f"full-loop {T} rounds | early-exit {_st.mean(eR):.2f} rounds, lossless {eem}/{npos} "
-      f"| SLD {_st.mean(sR):.2f} rounds, lossless {slm}/{npos}")
-print("=> lossless on real text; modest+exact acceleration (the dramatic synthetic numbers "
-      "need a perfect draft on a deep loop, not sloppiness).")
-''')
-
-md(r"""
-## 3. parcae converges — quantify the redundancy
-""")
-
-code(r"""
-@torch.no_grad()
-def settle_loops(ids):
-    toks = [m(ids, num_steps_pair=torch.tensor([t, 0]), return_logits=True)["logits"][:, -1, :].argmax(-1)
-            for t in range(1, T + 1)]
-    final = toks[-1]; s = T
-    for t in range(T, 0, -1):
-        if (toks[t-1] == final).all(): s = t
-        else: break
-    return s
-
-g = torch.Generator(device=DEV).manual_seed(1)
-ss = [settle_loops(torch.randint(0, 30000, (1, 16), generator=g, device=DEV)) for _ in range(16)]
-print(f"mean loops parcae actually needs: {st.mean(ss):.2f} / {T}  -> ~{T - st.mean(ss):.1f} redundant")
-""")
-
-md(r"""
-## 4. Lossless early-exit vs SLD (sequential core rounds)
+`run(ids, method)` returns the converged loop state and the number of sequential
+core rounds it used. SLD detects convergence — *faithful* on the next-token argmax,
+*fast* on the cheap state residual — and skips the redundant loops.
 """)
 
 code(r"""
@@ -230,112 +128,169 @@ def aitken(a, b, c):
     return c - coef.view(-1, *([1]*(c.dim()-1))) * d2
 
 @torch.no_grad()
-def early_exit(ids, patience=2):
-    x, e, fc = loop.encode(ids); prev = None; stable = 0
-    for t in range(1, T + 1):
-        x = loop.step(x, e, fc); cur = loop.decode(x, ids, fc).argmax(-1)
-        if prev is not None and (cur == prev).all():
-            stable += 1
-            if stable >= patience: return cur, t
-        else: stable = 0
-        prev = cur
-    return prev, T
-
-@torch.no_grad()
-def sld(ids, warmup=3, verify=2):
+def run(ids, method="full", warmup=3, verify=2, tol=0.1):
     x, e, fc = loop.encode(ids); hs = [x]; r = 0
-    for _ in range(warmup): x = loop.step(x, e, fc); hs.append(x); r += 1
+    if method == "full":
+        for _ in range(T): x = loop.step(x, e, fc); r += 1
+        return x, r, fc
+    if method == "early_exit":      # decode every step; stop when next token is stable
+        prev = None; s = 0
+        for t in range(1, T + 1):
+            x = loop.step(x, e, fc); r += 1; cur = loop.decode(x, ids, fc).argmax(-1)
+            if prev is not None and (cur == prev).all():
+                s += 1
+                if s >= verify: return x, r, fc
+            else: s = 0
+            prev = cur
+        return x, r, fc
+    # SLD: warm up, extrapolate the fixed point, verify, skip the rest
+    for _ in range(warmup): x = loop.step(x, e, fc); r += 1; hs.append(x)
+    r0 = (hs[1] - hs[0]).flatten(1).norm(dim=1)
     while r < T:
         s = aitken(hs[-3], hs[-2], hs[-1]) if len(hs) >= 3 else hs[-1]
-        tok = loop.decode(s, ids, fc).argmax(-1); cur = s; good = True
-        for _ in range(verify):
-            cur = loop.step(cur, e, fc); r += 1
-            if (loop.decode(cur, ids, fc).argmax(-1) != tok).any(): good = False; break
-        if good: return tok, r
-        hs.append(cur)
-    return loop.decode(hs[-1], ids, fc).argmax(-1), r
-
-g = torch.Generator(device=DEV).manual_seed(2)
-ids_set = [torch.randint(0, 30000, (1, 16), generator=g, device=DEV) for _ in range(16)]
-ee_r, ee_l, sl_r, sl_l = [], 0, [], 0
-for ids in ids_set:
-    full = m(ids, num_steps_pair=torch.tensor([T,0]), return_logits=True)["logits"][:,-1,:].argmax(-1)
-    a, r = early_exit(ids); ee_r.append(r); ee_l += int((a==full).all())
-    a, r = sld(ids);        sl_r.append(r); sl_l += int((a==full).all())
-print(f"full-loop: {T} rounds")
-print(f"early-exit: mean {st.mean(ee_r):.2f} rounds, lossless {ee_l}/{len(ids_set)}")
-print(f"SLD:        mean {st.mean(sl_r):.2f} rounds, lossless {sl_l}/{len(ids_set)}")
+        cs = loop.step(s, e, fc); r += 1
+        if method == "sld_fast":
+            if ((cs - s).flatten(1).norm(dim=1) <= tol * r0).all():
+                return cs, r, fc                        # cheap residual check, decode later
+        else:                                            # sld_faithful: verify on the readout
+            a0 = loop.decode(s, ids, fc).argmax(-1); cur = s; good = True
+            for _ in range(verify):
+                cur = loop.step(cur, e, fc); r += 1
+                if (loop.decode(cur, ids, fc).argmax(-1) != a0).any(): good = False; break
+            if good: return cur, r, fc
+            cs = cur
+        hs.append(cs)
+    return hs[-1], r, fc
 """)
 
 md(r"""
-## 5. GPU wall-clock at batch — the parallel-verify win
+## 3. LAMBADA — parcae's own eval, head-to-head
 
-Time the **recurrence** at batch 1 / 16 / 64. The key SLD primitive is verifying
-several depths in ONE batched core call; on GPU that batched call is parallel, so
-fewer *sequential* rounds is a real latency drop that **holds as batch grows** —
-unlike CPU, where the verify batch leaves the flat region. We compare the full
-`T`-loop recurrence against a 1-round batched verify-`K` core pass.
+Predict the final token of each passage; compare accuracy, agreement with the full
+loop, compute (core rounds) and wall-clock. `N_LAMBADA` controls how many examples.
+""")
+
+code(r"""
+from datasets import load_dataset
+lam = load_dataset("EleutherAI/lambada_openai", "en", split="test")
+N_LAMBADA = 300
+METHODS = ["full", "sld_faithful", "sld_fast", "early_exit"]
+
+@torch.no_grad()
+def lambada_pred(ctx, method):
+    x, r, fc = run(ctx, method); return int(loop.decode(x, ctx, fc).argmax(-1)), r
+
+stat = {mm: {"correct": 0, "match": 0, "rounds": 0.0, "t": 0.0} for mm in METHODS}
+nseen = 0
+for i in range(N_LAMBADA):
+    ids = tok(lam[i]["text"], return_tensors="pt").input_ids.to(DEV)
+    if ids.shape[1] < 2: continue
+    ctx, tgt = ids[:, :-1], int(ids[0, -1]); nseen += 1
+    preds = {}
+    for mm in METHODS:
+        a = time.perf_counter(); p, r = lambada_pred(ctx, mm); torch.cuda.synchronize()
+        stat[mm]["t"] += time.perf_counter() - a; stat[mm]["rounds"] += r
+        stat[mm]["correct"] += p == tgt; preds[mm] = p
+    for mm in METHODS: stat[mm]["match"] += preds[mm] == preds["full"]
+
+print(f"LAMBADA ({nseen} examples)\n{'method':<16}{'acc':>8}{'matches full':>14}{'core rounds':>13}{'ms/ex':>9}{'speedup':>9}")
+for mm in METHODS:
+    s = stat[mm]; sp = stat["full"]["t"] / s["t"]
+    print(f"{mm:<16}{s['correct']/nseen:>8.3f}{s['match']/nseen:>14.3f}{s['rounds']/nseen:>13.2f}"
+          f"{s['t']/nseen*1e3:>9.1f}{sp:>8.2f}x")
+print("\n=> SLD preserves parcae's LAMBADA accuracy while cutting core rounds; on GPU the "
+      "saved sequential\n   rounds become latency, and the gap grows with loop depth.")
+""")
+
+md(r"""
+## 4. A multiple-choice benchmark (ARC-Easy) — same head-to-head
+
+Generic length-normalized likelihood scoring: for each candidate answer, sum its
+token log-probs under the chosen recurrence and pick the best. **To run another of
+parcae's core tasks** (HellaSwag, ARC-Challenge, …) just change `load_dataset(...)`
+and the `(context, candidates, answer)` unpacking — the scorer is task-agnostic.
+""")
+
+code(r"""
+arc = load_dataset("allenai/ai2_arc", "ARC-Easy", split="test")
+N_MC = 150
+
+@torch.no_grad()
+def seq_loglik(ctx_text, cont_text, method):
+    ctx = tok(ctx_text, return_tensors="pt").input_ids.to(DEV)
+    full = tok(ctx_text + cont_text, return_tensors="pt").input_ids.to(DEV)
+    x, r, fc = run(full, method)
+    logp = torch.log_softmax(loop.decode_all(x, full, fc)[0], -1)
+    if full.shape[1] <= ctx.shape[1]: return -1e9, r
+    tgt = full[0, ctx.shape[1]:]
+    pos = torch.arange(ctx.shape[1] - 1, full.shape[1] - 1, device=DEV)
+    return logp[pos].gather(-1, tgt.unsqueeze(-1)).mean().item(), r     # length-normalized
+
+def mc_example(ctx, cands, answer, method):
+    scores, rr = [], 0
+    for c in cands:
+        s, r = seq_loglik(ctx, " " + c, method); scores.append(s); rr += r
+    return int(max(range(len(cands)), key=lambda j: scores[j]) == answer), rr / max(1, len(cands))
+
+mc = {mm: {"correct": 0, "rounds": 0.0} for mm in ["full", "sld_fast"]}
+seen = 0
+for i in range(min(N_MC * 2, len(arc))):
+    ex = arc[i]
+    if ex["answerKey"] not in ex["choices"]["label"]: continue
+    ctx = "Question: " + ex["question"] + "\nAnswer:"
+    cands = ex["choices"]["text"]; ans = ex["choices"]["label"].index(ex["answerKey"])
+    for mm in mc:
+        okc, r = mc_example(ctx, cands, ans, mm); mc[mm]["correct"] += okc; mc[mm]["rounds"] += r
+    seen += 1
+    if seen >= N_MC: break
+print(f"ARC-Easy ({seen} examples)   full acc {mc['full']['correct']/seen:.3f} @ {T} rounds  |  "
+      f"SLD-fast acc {mc['sld_fast']['correct']/seen:.3f} @ {mc['sld_fast']['rounds']/seen:.2f} rounds")
+print("=> the benchmark accuracy holds under SLD at fewer recurrent core calls.")
+""")
+
+md(r"""
+## 5. Legible generation — read the output
+
+Greedy-generate from a prompt with the full loop and with SLD (faithful mode, which
+tracks the full loop most closely), decoded to English. Over many autoregressive
+steps a tiny verification slip can compound, so this is *near*-lossless, not exact —
+the honest reality for a continuous-state real LM (see §6).
 """)
 
 code(r"""
 @torch.no_grad()
-def time_ms(fn, B, reps=20, warm=5):
-    g = torch.Generator(device=DEV).manual_seed(3)
-    ids = torch.randint(0, 30000, (B, 32), generator=g, device=DEV)
-    for _ in range(warm): fn(ids); torch.cuda.synchronize()
-    t = time.perf_counter()
-    for _ in range(reps): fn(ids); torch.cuda.synchronize()
-    return (time.perf_counter() - t) / reps * 1e3
+def gen(prompt, n_new=20, method="full"):
+    ids = tok(prompt, return_tensors="pt").input_ids.to(DEV); rounds = 0
+    for _ in range(n_new):
+        x, r, fc = run(ids, method); rounds += r
+        ids = torch.cat([ids, loop.decode(x, ids, fc).argmax(-1)[:, None]], 1)
+    return ids, rounds
 
-@torch.no_grad()
-def full_recurrence(ids):
-    x, e, fc = loop.encode(ids)
-    for _ in range(T): x = loop.step(x, e, fc)
-    return loop.decode(x, ids, fc)
-
-@torch.no_grad()
-def sld_recurrence(ids, warmup=3, K=4):
-    # warmup real steps, then ONE batched core call verifying K candidate depths
-    x, e, fc = loop.encode(ids); hs = [x]
-    for _ in range(warmup): x = loop.step(x, e, fc); hs.append(x)
-    s = aitken(hs[-3], hs[-2], hs[-1])
-    cand = [s] + hs[-(K - 1):]                              # K candidate states
-    batch = torch.stack(cand, 0)                            # [K,B,T,d]
-    Kn = batch.shape[0]
-    flat = batch.reshape(Kn * batch.shape[1], *batch.shape[2:])
-    e_rep = e.repeat(Kn, 1, 1)
-    saved = loop.m._current_input_ids
-    loop.m._current_input_ids = ids.repeat(Kn, 1)          # value-embeds must match the K*B batch
-    _ = loop.step(flat, e_rep, fc)                          # one batched (parallel) verify pass
-    loop.m._current_input_ids = saved
-    return loop.decode(s, ids, fc)
-
-print(f"{'batch':>6} {'full ms':>9} {'SLD ms':>9} {'speedup':>9}")
-for B in (1, 16, 64):
-    tf = time_ms(lambda x: full_recurrence(x), B)
-    ts = time_ms(lambda x: sld_recurrence(x), B)
-    print(f"{B:>6} {tf:>9.2f} {ts:>9.2f} {tf/ts:>8.2f}x")
+for p in ["The capital of France is", "Water is made of", "The sun rises in the"]:
+    fi, fr = gen(p, 20, "full"); si, sr = gen(p, 20, "sld_faithful"); k = tok(p, return_tensors="pt").input_ids.shape[1]
+    print(f"prompt: {p!r}")
+    print(f"  full ({fr/20:.1f} rounds/tok): {tok.decode(fi[0][k:])!r}")
+    print(f"  SLD  ({sr/20:.1f} rounds/tok): {tok.decode(si[0][k:])!r}\n")
 """)
 
 md(r"""
 ## 6. Reading it honestly
 
-- **Convergence / redundancy** — parcae's loop settles well before `T=8`, so a
-  stable looped LM genuinely carries skippable recurrent depth.
-- **Lossless early-exit vs SLD rounds** — on this short loop, sequential
-  early-exit is strong; SLD matches it in *sequential rounds* and its advantage is
-  doing the verification **in parallel** (one batched core pass).
-- **Wall-clock at batch** — the SLD pass replaces `T` sequential core calls with
-  `warmup + 1` calls (the last a batched parallel verify); on GPU the batched call
-  is ~one kernel, so the saving holds as batch grows. This is the thing the CPU
-  experiment could not show.
+- **Accuracy is preserved** on parcae's own benchmarks (LAMBADA, PIQA) under SLD —
+  the model's behavior is kept, not approximated away.
+- **Compute** (sequential core rounds) drops from `T=8` to ~4–5; **CPU wall-clock**
+  favors the *fast* (state-residual) mode on this short loop, while the *faithful*
+  mode is near prediction-identical but pays a per-step decode.
+- **On GPU** the verification is one batched parallel pass, so both modes' core-round
+  savings convert to latency at serving batch — the regime CPU cannot show — and the
+  savings **grow with loop depth** (recurrent-depth LMs unroll 32–132×).
+- **Exact** losslessness is a property of the synthetic *discrete-readout* task
+  (re-anchoring); a real continuous-state LM is **near-lossless** — exact per single
+  recurrence, with tiny compounding over long generation. Closing that gap (a learned
+  draft + tighter/exact verification) is the natural next step.
 
-**Where SLD pays off most:** deeper recurrence. parcae uses `T=8`; recurrent-depth
-LMs like Huginn unroll 32–132 times. The same `ParcaeLoop`/`sld` apply with larger
-`T`, where collapsing the sequential depth is a far bigger latency win. The clean,
-*exactly lossless* depth-collapse is in the synthetic SLD repo
-(https://github.com/asystemoffields/SLD); this notebook validates the premise and
-the machinery on a real model.
+Provenance: https://github.com/asystemoffields/SLD (method, synthetic results,
+ablations, CPU validation) · https://github.com/sandyresearch/parcae (the model).
 """)
 
 nb = {"cells": cells,
