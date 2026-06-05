@@ -88,7 +88,11 @@ sld/
   training.py    distill the draft on the frozen teacher's trajectory tape
 bench/
   experiment.py  the frontier experiment (depth, horizon, baselines, wall-clock)
-  common.py      checkpoint + timing helpers
+  draft_quality.py  speedup tracks draft acceptance, always lossless
+  convergent.py  contracting-map loop: SLD vs a *fair* early-exit baseline
+  incontext.py   non-memorizable in-context map (generality probe)
+  parcae_cpu.py / parcae_sld.py  real parcae-140m on CPU (validated adapter)
+  summarize.py / plot.py / common.py  tables, figure, checkpoint + timing helpers
 tests/           losslessness + control invariants
 notebooks/       sld_parcae_gpu.ipynb — take SLD to a GPU on a real looped LM (parcae)
 SLD_SPEC.md      the method, losslessness proof sketch, prior art, falsification bar
@@ -147,6 +151,15 @@ is the expected latency-not-throughput / discrete-readout scope; the
 hardware-free **counted-core-rounds** result (constant vs linear in `k`) is where
 the contribution is airtight — on parallel hardware those rounds *are* the
 latency.
+
+**Full results map** (`RESULTS.md`): (1) depth sweep, (2) horizon, (3) length
+generalization — *why lossless matters* (lossy one-shot collapses OOD, SLD stays
+lossless), (4) controls, (5) wall-clock, (6) falsification scorecard, (7)
+**convergent loop vs a *fair* early-exit** (SLD wins, 1.0×→3.5× with depth), (8)
+in-context (non-memorizable) probe — an honest teacher-capacity limitation, (9)
+**draft quality is the only knob** (speedup tracks acceptance; always lossless),
+(10) **real parcae-140m on CPU** (validated adapter; the loop converges by ~2.8/8
+loops), (11) honest scope.
 
 ## License
 
