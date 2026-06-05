@@ -79,7 +79,7 @@ This is exactly the failure mode of the original JumpRec confidence-verifier
   advancing loop, exactly as predicted. It is the "works on any frozen loop"
   control, not the headline; the learned draft is what collapses rounds to 1.
 
-## 5. Wall-clock (honest, both regimes)
+## 5. Wall-clock (both regimes)
 
 Batch-1 latency (the regime SLD targets): speedup grows with depth.
 
@@ -233,7 +233,7 @@ SLD-fast 0.530) — and beats naive **early-exit, which *degrades* accuracy to
   **1.44× faster on CPU** at 4 core rounds, accuracy preserved — and faster than
   early-exit, which also decodes every step.
 
-So the honest compute/wall-clock picture on a real benchmark: SLD saves recurrent
+So the compute/wall-clock picture on a real benchmark: SLD saves recurrent
 core calls (8 → 4–5.25) and **preserves accuracy**; the *wall-clock* win on CPU
 needs the cheap-verification mode (1.44×), and both modes' core-call saving
 becomes latency on GPU (parallel verify) and grows with loop depth.
@@ -263,7 +263,7 @@ lossless early-exit and SLD are run on the same recurrence:
 SLD reproduces these at ~5.2/8 core rounds per token, **exactly on 3/4 prompts
 (63/80 tokens)**.
 
-**The honest boundary (this is the important part).** Exact losslessness is a
+**The boundary (the important part).** Exact losslessness is a
 property of the *synthetic, discrete-readout* task: re-anchoring snaps the carried
 state back onto the trajectory manifold, so acceptance on the argmax symbol is
 bit-stable. A *real LM has continuous state with no discrete sufficient statistic*,
@@ -301,7 +301,7 @@ out-of-distribution depths since the model was trained at `T=8`; still, the
 skippable headroom grows.) Deep recurrent-depth LMs — Huginn unrolls 32–132 —
 are therefore exactly where a lossless depth-skipper has the most to gain.
 
-**Honest reading.** On parcae's *short* `T=8`, fast-converging loop, *sequential*
+**Interpretation.** On parcae's *short* `T=8`, fast-converging loop, *sequential*
 early-exit already captures the headroom on CPU; the extrapolation draft doesn't
 beat it here. SLD's distinct advantage is (a) verifying several depths **in
 parallel** (one batched core pass) → fewer *sequential* rounds at GPU serving
@@ -313,7 +313,7 @@ SLD's lossless, depth-collapsing win is demonstrated cleanly; parcae confirms th
 premise on a real model — a stable looped LM does carry large, exploitable
 recurrent redundancy.
 
-## 11. Honest scope & limitations
+## 11. Scope & limitations
 
 - **Discrete-readout regime.** Losslessness is rigorous because acceptance is on
   the argmax symbol and the symbolic recurrence is readout-Markov; re-anchoring

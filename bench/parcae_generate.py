@@ -67,7 +67,7 @@ def main():
     print(f"   115/115 positions), but over many autoregressive steps the fixed-point-acceptance", flush=True)
     print(f"   heuristic can accept slightly early and compound -- the EXACT guarantee needs the", flush=True)
     print(f"   discrete-readout re-anchoring of the synthetic task, which a continuous-state LM", flush=True)
-    print(f"   lacks. Honest: dramatic+exact is synthetic; real LM is modest+near-lossless.", flush=True)
+    print(f"   lacks. Net: the dramatic exact case is synthetic; a real LM is modest + near-lossless.", flush=True)
 
 
 if __name__ == "__main__":

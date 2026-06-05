@@ -1,7 +1,7 @@
 """Real natural-language validation on parcae-140m (CPU).
 
 The synthetic SLD result (1 round vs k) is dramatic *because* the synthetic draft
-is perfect. The honest question is whether SLD preserves a REAL model's REAL
+is perfect. The real question is whether SLD preserves a real model's real
 language-modeling behavior while saving loop rounds. Here we tokenize real English
 with parcae's own tokenizer (SandyResearch/parcae-tokenizer), measure parcae's
 next-token accuracy at the full T-loop, and check that lossless SLD / early-exit

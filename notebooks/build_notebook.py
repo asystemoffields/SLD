@@ -247,7 +247,7 @@ md(r"""
 Greedy-generate from a prompt with the full loop and with SLD (faithful mode, which
 tracks the full loop most closely), decoded to English. Over many autoregressive
 steps a tiny verification slip can compound, so this is *near*-lossless, not exact —
-the honest reality for a continuous-state real LM (see §6).
+the reality for a continuous-state real LM (see §6).
 """)
 
 code(r"""
@@ -267,7 +267,7 @@ for p in ["The capital of France is", "Water is made of", "The sun rises in the"
 """)
 
 md(r"""
-## 6. Reading it honestly
+## 6. Reading the results
 
 - **Accuracy is preserved** on parcae's own benchmarks (LAMBADA, ARC-Easy) under SLD
   — the model's behavior is kept, and SLD holds it more faithfully than the

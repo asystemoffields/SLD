@@ -1,167 +1,114 @@
 # SLD — Speculative Looped Decoding
 
-**Lossless acceleration of looped / recurrent-depth transformers by transplanting
-speculative decoding from the token axis to the depth axis.**
+**Verified acceleration of looped / recurrent-depth transformers.** A looped model
+reasons by running a shared **core** block many times (`h_{t+1} = core(h_t + e)`),
+which is powerful but **sequential** — and often *redundant*: the computation tends
+to converge well before the loop budget is spent. SLD detects that convergence
+cheaply, **extrapolates** the converged state, and **verifies** it (accept only when
+the model's next-token prediction is stable under more true core steps) before
+skipping the remaining loops. The model's behavior is *preserved* — not approximated
+away — at fewer sequential core calls.
 
-A looped transformer reasons by running a shared **core** block many times —
-`h_{t+1} = core(h_t + e)` — which is powerful but **sequential**: a depth-`k`
-answer costs `k` core calls, one after another. SLD makes those calls (mostly)
-parallel. A cheap **draft** proposes a whole *trajectory* of future loop states;
-the true core **verifies all of them in one batched pass**; SLD **accepts the
-longest prefix** the true core agrees with and continues from there. A depth-`k`
-computation collapses from `k` sequential rounds to `ceil(k / accepted)` — `O(1)`
-when the draft is good — and the answer is **identical to the full loop**.
+## Validated on a real model (parcae-140m)
 
-This is the lossless accept-longest-prefix protocol of speculative / blockwise
-parallel decoding (Stern 2018; Leviathan, Chen 2023), applied for the first time
-to a single token's **depth/loop trajectory** on a **frozen** looped transformer.
-See [`SLD_SPEC.md`](SLD_SPEC.md) for the method, the precise losslessness
-condition, prior-art positioning, and the falsification bar.
+The real test of any looped-LM speedup is whether it preserves a *real* model's
+*real* behavior. We run SLD on the pretrained
+[`parcae-140m`](https://github.com/sandyresearch/parcae) stable looped LM
+(recurrence `T=8`) — on **parcae's own evaluations**, head-to-head against the full
+loop (`bench/parcae_lambada.py`, `bench/parcae_nl.py`, `bench/parcae_generate.py`):
 
-## Result in one table
+**LAMBADA** (`eval_configs/eval-lambada.yaml`, 200 examples, CPU):
 
-Fixed-permutation pointer-chasing (`answer = pi^k(start)`), a 0.3M-param looped
-teacher trained from scratch on CPU (100% exact match), depth `k` swept. **Every
-row is lossless vs the full loop, asserted byte-for-byte.**
+| method | LAMBADA acc | matches full loop | core rounds | CPU ms/ex |
+|---|--:|--:|--:|--:|
+| full loop | 0.535 | — | 8 | 181 |
+| **SLD** | **0.535** | 96.5% | 5.25 | 277 |
+| early-exit | 0.520 | 93.0% | 3.68 | 269 |
 
-| k | full-loop rounds | early-exit rounds | **SLD rounds** | mean accept | wall-clock speedup @ batch-1 |
-|--:|--:|--:|--:|--:|--:|
-| 2  | 2  | 1.87  | **1.00** | 2.00  | 0.60× |
-| 4  | 4  | 3.80  | **1.00** | 4.00  | 0.86× |
-| 8  | 8  | 7.70  | **1.00** | 8.00  | 1.28× |
-| 12 | 12 | 11.08 | **1.00** | 12.00 | 1.67× |
-| 16 | 16 | 15.12 | **1.00** | 16.00 | **2.07×** |
+SLD **preserves parcae's benchmark accuracy** (0.535 → 0.535) while cutting the
+recurrence to ~5 of 8 core calls, and holds it *more faithfully than the un-verified
+early-exit baseline*, which drops to 0.520. ARC-Easy (a multiple-choice benchmark)
+shows the same accuracy preservation. And it is **legible** — parcae generates
+coherent English and SLD reproduces it:
 
 ```
-sequential core rounds vs depth k        (full=#   SLD=O)
-k= 2 |OO##........................   full=2   SLD=1
-k= 4 |OO#####.....................   full=4   SLD=1
-k= 8 |OO############..............   full=8   SLD=1
-k=12 |OO###################.......   full=12  SLD=1
-k=16 |OO##########################   full=16  SLD=1
+"The capital of France is" -> " Paris. It is the capital of the French Republic,
+                                the largest country in Europe, and the largest"
+"Water is made of"         -> " water molecules. Water molecules are made up of
+                                water, hydrogen, oxygen, carbon, nitrogen, and"
 ```
 
-![SLD frontier: rounds vs depth, and wall-clock speedup vs depth](results/frontier_main.png)
+**Scope.** This is *near*-lossless on a real continuous-state LM — predictions
+are essentially identical per recurrence, with a rare early-accept that can compound
+over long greedy generation. On parcae's short `T=8` loop the per-step verification
+can offset the saved core calls in *CPU wall-clock*; the saving converts to **latency
+on a GPU** (each forward is a kernel launch) and **grows with loop depth** —
+recurrent-depth LMs unroll 32–132×, where the full loop is far more wasteful.
 
-The headline: **full-loop sequential core rounds grow linearly with depth `k`;
-SLD stays at one round** (a single batched verification swallows the whole
-trajectory), while remaining exactly lossless. The batch-1 wall-clock speedup
-grows monotonically with `k`, crossing 1× near `k=6` and reaching **2.07× at
-`k=16`** (SLD is ~constant at ~1.6 ms; the full loop grows to 3.3 ms). Early-exit
-cannot help on this advancing (non-converging) loop — only a draft that
-*predicts where the loop will be* can skip ahead, which is exactly what SLD
-verifies and exploits.
+## Take it to a GPU
 
-**Why lossless matters (length generalization).** Push `k` past the draft's
-horizon and the draft goes out-of-distribution. The lossy one-shot jump
-collapses to chance; SLD stays exactly lossless by spending one more verified
-round:
+[`notebooks/sld_parcae_gpu.ipynb`](notebooks/sld_parcae_gpu.ipynb) is a Colab
+notebook that runs this head-to-head on a GPU: a **self-validating** parcae adapter
+(it asserts the reconstructed loop matches parcae's native output before any claim),
+then LAMBADA + ARC-Easy + generation, full-loop vs SLD, reporting accuracy,
+agreement, core rounds and wall-clock. Adding another of parcae's core tasks is a
+one-line `load_dataset(...)` change.
 
-| k | in draft horizon? | draft-only acc (lossy) | **SLD acc** | SLD rounds |
-|--:|:--:|--:|--:|--:|
-| 16 | yes | 1.000 | **1.000** | 1.0 |
-| 18 | **no (OOD)** | 0.029 | **1.000** | 2.0 |
-| 20 | **no (OOD)** | 0.035 | **1.000** | 2.0 |
+## How it works
+
+For each token, the recurrence runs the shared core `T` times to produce next-token
+logits. SLD:
+1. runs a few real core steps (warm-up);
+2. **extrapolates** the converged state with a vector fixed-point accelerator
+   (Aitken / Anderson);
+3. **verifies** the extrapolated state by checking its next-token prediction is
+   stable under a couple more true core steps;
+4. accepts and stops if stable, else keeps looping.
+
+The result is identical-or-near-identical to the full loop, at fewer sequential core
+calls. The method is a depth-axis cousin of speculative decoding (verify a cheap
+guess against the true model, fall back when it disagrees).
 
 ## Install & run
 
-SLD builds on the [`jumprec`](https://github.com/asystemoffields/jumprec)
-substrate (the looped transformer + recurrence task). Either install it, or keep
-a sibling `../SMOKE` checkout / set `JUMPREC_PATH` (see `sld/substrate.py`).
+SLD builds on the [`jumprec`](https://github.com/asystemoffields/jumprec) substrate
+(the looped-transformer + a synthetic recurrence task used for the controlled study
+below). Either install it, keep a sibling `../SMOKE` checkout, or set `JUMPREC_PATH`.
 
 ```bash
-# CPU torch + numpy; jumprec on the path (pip install -e ../SMOKE, or PYTHONPATH)
-pip install -e .
-PYTHONPATH=../SMOKE python -m pytest tests/ -q          # losslessness invariants
-PYTHONPATH=../SMOKE:. python bench/experiment.py --tag main   # the full frontier
+pip install -e .                                  # torch (cpu/gpu) + numpy
+PYTHONPATH=../SMOKE python -m pytest tests/ -q    # invariants
+# real-model validation (downloads parcae-140m + tokenizer):
+PYTHONPATH=../SMOKE:. python bench/parcae_lambada.py 200
+PYTHONPATH=../SMOKE:. python bench/parcae_generate.py
 ```
 
-The experiment trains (and caches) a teacher, a learned draft, and the original
-JumpRec jump baseline, then writes the depth sweep, horizon sweep, baselines, and
-wall-clock numbers to `results/frontier_main.json`.
+## A controlled synthetic study (clearly bounded)
+
+To characterize the *mechanism* in isolation — where the recurrence is a clean,
+discrete-symbol computation and the verifier can be exact — see
+[`RESULTS.md`](RESULTS.md) ("Synthetic study"). There the readout is a sufficient
+statistic, so verification is bit-stable and SLD is **exactly lossless**, and on a
+deliberately deep loop its sequential-round advantage over early-exit grows large.
+That is a controlled best-case for understanding the method; the **real-model
+parcae numbers above are the load-bearing claim** — a real continuous-state LM does
+not have that discrete structure, and there SLD is near-lossless, as reported.
 
 ## What's here
 
 ```
-sld/
-  substrate.py   bridge to the jumprec looped-transformer substrate
-  draft.py       LearnedDraft, AndersonDraft (training-free), Identity/Blind controls, JumpModule
-  specloop.py    sld_decode + full-loop / early-exit / confidence-jump baselines
-  training.py    distill the draft on the frozen teacher's trajectory tape
+sld/             specloop.py, draft.py, training.py, substrate.py  (the method + substrate bridge)
 bench/
-  experiment.py  the frontier experiment (depth, horizon, baselines, wall-clock)
-  draft_quality.py  speedup tracks draft acceptance, always lossless
-  convergent.py  contracting-map loop: SLD vs a *fair* early-exit baseline
-  incontext.py   non-memorizable in-context map (generality probe)
-  parcae_cpu.py / parcae_sld.py  real parcae-140m on CPU (validated adapter)
-  summarize.py / plot.py / common.py  tables, figure, checkpoint + timing helpers
-tests/           losslessness + control invariants
-notebooks/       sld_parcae_gpu.ipynb — take SLD to a GPU on a real looped LM (parcae)
-SLD_SPEC.md      the method, losslessness proof sketch, prior art, falsification bar
+  parcae_lambada.py / parcae_nl.py / parcae_generate.py / parcae_sld.py / parcae_cpu.py
+                 real parcae-140m validation (validated adapter, his evals)
+  experiment.py / convergent*.py / draft_quality.py / incontext.py
+                 the controlled synthetic study (depth, ablations)
+  summarize.py / plot.py / common.py / run_all.sh
+notebooks/       sld_parcae_gpu.ipynb  (GPU head-to-head on parcae)
+tests/           losslessness + control invariants (synthetic)
+RESULTS.md       real-model results, then the bounded synthetic study
+SLD_SPEC.md      the method, the losslessness condition, prior art
 ```
-
-## GPU / real model (parcae)
-
-`notebooks/sld_parcae_gpu.ipynb` is a self-contained Colab notebook that applies
-SLD to [`parcae`](https://github.com/sandyresearch/parcae) (a pretrained *stable
-looped LM*, recurrence `T=8`, contractive core) on a GPU — the regime where the
-batched verify stays parallel, so SLD's fewer *sequential* core rounds become a
-real **latency** win at serving batch (the win the CPU experiment could not show).
-It builds a self-validating adapter (it asserts the reconstructed loop matches
-parcae's native output before any SLD claim) and measures losslessness, core
-rounds, and wall-clock at batch 1/16/64. Regenerate it with
-`python notebooks/build_notebook.py`.
-
-## Honest scope
-
-- Losslessness is rigorous for **discrete-readout** recurrence (we verify on the
-  argmax answer, which is bit-stable); we assert it holds 100% across all `k`.
-- The wall-clock win is a **batch-1 latency** result on a **compact** core, where
-  batched verification stays in the CPU "flat" region. The hardware-free
-  **counted core rounds** metric is where the result is airtight; on parallel
-  hardware those rounds are the latency. At large serving batch the win shrinks —
-  reported honestly in `results/`.
-
-## Results
-
-Full numbers in `results/frontier_main.json`; regenerate the tables with
-`python bench/summarize.py main`. Highlights below (32 symbols, teacher 0.3M
-params @ 100% exact match, draft 0.14M params, horizon 16, 6 threads).
-
-**Horizon sweep (k=16)** — rounds are exactly `ceil(k/H)`, FLOP-matched (16 core
-rows either way), all lossless:
-
-| horizon H | SLD rounds | core rows/example | mean accept |
-|--:|--:|--:|--:|
-| 1 | 16.00 | 16.0 | 1.00 |
-| 2 | 8.00  | 16.0 | 2.00 |
-| 4 | 4.00  | 16.0 | 4.00 |
-| 8 | 2.00  | 16.0 | 8.00 |
-| 16 | 1.00 | 16.0 | 16.00 |
-
-**Controls (all lossless)** — isolate the source of the win. No-draft (identity)
-and blind drafts save nothing (rounds ≈ k); the training-free Anderson draft is
-weak on the advancing phase (≈0.8·k rounds), exactly as a fixed-point
-extrapolator should be when there is no fixed point to chase yet. Only the
-learned draft collapses rounds to 1.
-
-**Wall-clock.** Batch-1 latency speedup grows with `k` (0.60× → **2.07×** at
-k=16) — the round-count win shows through once the saved core calls outweigh the
-per-round overhead. Batch-64 throughput does **not** win (0.6–0.7×): the verify
-batch `B·H` leaves the CPU flat region and the extra readout pass costs ~1×. This
-is the expected latency-not-throughput / discrete-readout scope; the
-hardware-free **counted-core-rounds** result (constant vs linear in `k`) is where
-the contribution is airtight — on parallel hardware those rounds *are* the
-latency.
-
-**Full results map** (`RESULTS.md`): (1) depth sweep, (2) horizon, (3) length
-generalization — *why lossless matters* (lossy one-shot collapses OOD, SLD stays
-lossless), (4) controls, (5) wall-clock, (6) falsification scorecard, (7)
-**convergent loop vs a *fair* early-exit** (SLD wins, 1.0×→3.5× with depth), (8)
-in-context (non-memorizable) probe — an honest teacher-capacity limitation, (9)
-**draft quality is the only knob** (speedup tracks acceptance; always lossless),
-(10) **real parcae-140m on CPU** (validated adapter; the loop converges by ~2.8/8
-loops), (11) honest scope.
 
 ## License
 

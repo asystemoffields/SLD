@@ -77,7 +77,7 @@ nuisance dimensions, so the final answer is identical to the full loop. We
 **assert** this byte-for-byte in `bench/experiment.py` and the test suite (it
 holds at 100% across all `k` and seeds).
 
-Honest scope (what the red-team flagged and we respect):
+Scope (what the red-team flagged and we respect):
 - Losslessness is rigorous for **discrete-readout** recurrence; on a fully
   continuous-state loop SLD is "verified to a tolerance" (lossy in kind, like the
   original confidence verifier). We benchmark the discrete-readout regime.
@@ -85,7 +85,7 @@ Honest scope (what the red-team flagged and we respect):
   core, where a batched verify of `H` states stays in the CPU "flat" region
   (measured: verifying 17 states ≈ 1.3× one call at d=96, 6 threads). At large
   serving batch `B`, the verify batch `B·H` leaves the flat region and the win
-  shrinks — we report this honestly. The **counted-core-rounds** metric is
+  shrinks — we report this. The **counted-core-rounds** metric is
   hardware-free and is where the result is airtight; on parallel hardware (the
   real home of looped LLMs) those rounds are the latency.
 

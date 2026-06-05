@@ -7,7 +7,7 @@ jump baseline, then evaluates the full compute/quality/wall-clock frontier:
   * horizon sweep H:    rounds ~ ceil(k/H) and the wall-clock tradeoff
   * draft controls:     learned vs identity (no-draft) vs blind vs Anderson
   * lossy predecessor:  original-JumpRec confidence jump, swept over thresholds
-  * wall-clock:         batch-1 latency (the honest regime) and batch-64 throughput
+  * wall-clock:         batch-1 latency (the representative regime) and batch-64 throughput
 
 Everything is asserted lossless against the full loop. Run:
     PYTHONPATH=../SMOKE python bench/experiment.py
