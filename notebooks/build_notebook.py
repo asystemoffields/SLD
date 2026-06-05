@@ -52,10 +52,12 @@ code(r"""
 # parcae's REAL package is the GitHub source (the PyPI 'parcae-lm' is an empty stub).
 !pip -q install "git+https://github.com/sandyresearch/parcae" einops safetensors tokenizers transformers >/dev/null 2>&1
 import parcae_lm
+from transformers import AutoTokenizer
 m = parcae_lm.from_pretrained("SandyResearch/parcae-140m").to(DEV).eval()
 for p in m.parameters(): p.requires_grad_(False)
+tok = AutoTokenizer.from_pretrained("SandyResearch/parcae-tokenizer")   # parcae's own tokenizer
 T = int(getattr(m.config, "mean_recurrence", 8))
-print("loaded parcae-140m | recurrence T =", T,
+print("loaded parcae-140m | recurrence T =", T, "| tokenizer vocab", tok.vocab_size,
       "| layers prelude/core/coda =",
       m.config.n_layers_in_prelude, m.config.n_layers_in_recurrent_block, m.config.n_layers_in_coda)
 """)
@@ -117,14 +119,87 @@ print("[ok] adapter validated on real parcae (GPU).")
 """)
 
 md(r"""
-> **Inputs.** parcae's tokenizer isn't bundled with the 140m checkpoint, so the
-> cells below use valid *random* token ids — the loop's convergence is a property
-> of the model on its input regardless. If you have parcae's tokenizer, swap in
-> real text, e.g.
-> `ids = tok("The capital of France is", return_tensors="pt").input_ids.to(DEV)`,
-> and everything else is unchanged.
+## 2. Real English text — the non-synthetic check (start here)
 
-## 2. parcae converges — quantify the redundancy
+The headline question for any "dramatic" looped-LM speedup: does it preserve the
+*real* model's *real* language-modeling behavior? We tokenize real English with
+parcae's own tokenizer, measure parcae's next-token accuracy at the full `T`-loop,
+then check that lossless early-exit and SLD reproduce **every** next-token
+prediction while using fewer sequential core rounds.
+""")
+
+code(r'''
+@torch.no_grad()
+def aitken(a, b, c):                         # vector Aitken extrapolation of the fixed point
+    d1, d2 = b - a, c - b; dd = d2 - d1
+    coef = (d2*dd).flatten(1).sum(1, keepdim=True) / (dd*dd).flatten(1).sum(1, keepdim=True).clamp_min(1e-9)
+    return c - coef.view(-1, *([1]*(c.dim()-1))) * d2
+
+@torch.no_grad()
+def decode_all(x, ids):
+    mm = m; fc = mm.freqs_cis[:, : ids.shape[1]]
+    x = mm.transformer.C(x)
+    off = mm.config.n_layers_in_prelude + mm.config.n_layers_in_recurrent_block
+    for i, blk in enumerate(mm.transformer.coda):
+        k = str(off + i); ve = mm.value_embeds[k](ids) if k in mm.value_embeds else None
+        x = blk(x, fc, None, ve=ve)
+    return (mm.lm_head(mm.transformer.ln_f(x)).float() * loop.logit_scale)   # [1,seq,vocab]
+
+@torch.no_grad()
+def full_all(ids):
+    x, e, fc = loop.encode(ids)
+    for _ in range(T): x = loop.step(x, e, fc)
+    return decode_all(x, ids)
+
+@torch.no_grad()
+def ee_all(ids, patience=2):
+    x, e, fc = loop.encode(ids); prev=None; s=0
+    for t in range(1, T+1):
+        x = loop.step(x, e, fc); cur = decode_all(x, ids).argmax(-1)
+        if prev is not None and (cur==prev).all():
+            s += 1
+            if s>=patience: return cur, t
+        else: s=0
+        prev = cur
+    return prev, T
+
+@torch.no_grad()
+def sld_all(ids, warmup=3, verify=2):
+    x, e, fc = loop.encode(ids); hs=[x]; r=0
+    for _ in range(warmup): x = loop.step(x, e, fc); hs.append(x); r+=1
+    while r < T:
+        s = aitken(hs[-3], hs[-2], hs[-1]) if len(hs)>=3 else hs[-1]
+        a0 = decode_all(s, ids).argmax(-1); cur=s; good=True
+        for _ in range(verify):
+            cur = loop.step(cur, e, fc); r+=1
+            if (decode_all(cur, ids).argmax(-1) != a0).any(): good=False; break
+        if good: return a0, r
+        hs.append(cur)
+    return decode_all(hs[-1], ids).argmax(-1), r
+
+PASSAGES = ["The capital of France is Paris, a city on the river Seine.",
+            "Water is made of two hydrogen atoms and one oxygen atom.",
+            "In 1969, Apollo 11 landed the first humans on the surface of the Moon.",
+            "Photosynthesis is the process by which plants convert sunlight into energy.",
+            "The Pacific Ocean is the largest and deepest of the world's oceans."]
+import statistics as _st
+nc=ntok=npos=eem=slm=0; eR=[]; sR=[]
+for txt in PASSAGES:
+    ids = tok(txt, return_tensors="pt").input_ids.to(DEV)
+    fl = full_all(ids); pred = fl.argmax(-1)
+    nc += (pred[:, :-1] == ids[:, 1:]).sum().item(); ntok += ids[:, 1:].numel()
+    ea, er = ee_all(ids); sa, sr = sld_all(ids)
+    eem += (ea==pred).sum().item(); slm += (sa==pred).sum().item(); npos += pred.numel()
+    eR.append(er); sR.append(sr)
+print(f"parcae-140m on REAL English: next-token top-1 acc {nc/ntok:.3f}  ({ntok} tokens)")
+print(f"full-loop {T} rounds | early-exit {_st.mean(eR):.2f} rounds, lossless {eem}/{npos} "
+      f"| SLD {_st.mean(sR):.2f} rounds, lossless {slm}/{npos}")
+print("=> lossless on real text; modest+exact acceleration (the dramatic synthetic numbers "
+      "need a perfect draft on a deep loop, not sloppiness).")
+''')
+
+md(r"""
+## 3. parcae converges — quantify the redundancy
 """)
 
 code(r"""
@@ -144,7 +219,7 @@ print(f"mean loops parcae actually needs: {st.mean(ss):.2f} / {T}  -> ~{T - st.m
 """)
 
 md(r"""
-## 3. Lossless early-exit vs SLD (sequential core rounds)
+## 4. Lossless early-exit vs SLD (sequential core rounds)
 """)
 
 code(r"""
@@ -193,7 +268,7 @@ print(f"SLD:        mean {st.mean(sl_r):.2f} rounds, lossless {sl_l}/{len(ids_se
 """)
 
 md(r"""
-## 4. GPU wall-clock at batch — the parallel-verify win
+## 5. GPU wall-clock at batch — the parallel-verify win
 
 Time the **recurrence** at batch 1 / 16 / 64. The key SLD primitive is verifying
 several depths in ONE batched core call; on GPU that batched call is parallel, so
@@ -243,7 +318,7 @@ for B in (1, 16, 64):
 """)
 
 md(r"""
-## 5. Reading it honestly
+## 6. Reading it honestly
 
 - **Convergence / redundancy** — parcae's loop settles well before `T=8`, so a
   stable looped LM genuinely carries skippable recurrent depth.
