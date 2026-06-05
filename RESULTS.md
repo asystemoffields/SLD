@@ -189,7 +189,39 @@ as a GPU affords, or a draft tuned to a real model's loop) turns toward bigger
 wins. It also makes the safety property concrete: a bad or out-of-distribution
 draft can never hurt the answer, only the speed.
 
-## 10. Honest scope & limitations
+## 10. Real model: parcae-140m on CPU (validated)
+
+`bench/parcae_cpu.py` and `bench/parcae_sld.py` run on the actual pretrained
+[`parcae-140m`](https://github.com/sandyresearch/parcae) stable looped LM
+(recurrence `T=8`, contractive core) — on this CPU box (it loads in ~60s, 144M
+params; the GitHub package, not the empty PyPI stub). We reconstruct parcae's
+loop as `encode`/`step`/`decode` from its own modules and **assert** the manual
+loop reproduces parcae's native next-token output before reporting anything
+(`core_block_forward` is time-invariant given `_current_input_ids`; the decode
+path is `C → coda → ln_f → lm_head·logit_scale`).
+
+Findings (16 inputs):
+- **The loop converges fast.** parcae's next token settles to its full-`T` value
+  by **~2.9 of 8 loops** on average — ~5 loops are redundant.
+- **Lossless convergence early-exit:** **8 → 4.56 sequential core rounds**
+  (14/16 exactly matching the full loop; convergence detection on a fixed-`T`
+  model is a near-, not hard-, guarantee).
+- A verified fixed-point (Anderson) SLD reaches the same answers at 5.56 rounds,
+  15/16 lossless.
+
+**Honest reading.** On parcae's *short* `T=8`, fast-converging loop, *sequential*
+early-exit already captures the headroom on CPU; the extrapolation draft doesn't
+beat it here. SLD's distinct advantage is (a) verifying several depths **in
+parallel** (one batched core pass) → fewer *sequential* rounds at GPU serving
+batch, and (b) **deep** recurrence (e.g. Huginn's 32–132 unrolls), where leaping
+the converging phase pays off far more than on 8 loops. That is precisely what
+`notebooks/sld_parcae_gpu.ipynb` targets — and the adapter there is now the
+*validated* parcae loop, not a guess. The synthetic results (§1–9) are where
+SLD's lossless, depth-collapsing win is demonstrated cleanly; parcae confirms the
+premise on a real model — a stable looped LM does carry large, exploitable
+recurrent redundancy.
+
+## 11. Honest scope & limitations
 
 - **Discrete-readout regime.** Losslessness is rigorous because acceptance is on
   the argmax symbol and the symbolic recurrence is readout-Markov; re-anchoring

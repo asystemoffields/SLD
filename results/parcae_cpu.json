@@ -1,0 +1,136 @@
+{
+  "T": 8,
+  "mean_loops_needed": 2.875,
+  "frac_settled_by_loop": {
+    "1": 0.5,
+    "2": 0.5,
+    "3": 0.625,
+    "4": 0.875,
+    "5": 0.875,
+    "6": 0.875,
+    "7": 0.875,
+    "8": 1.0
+  },
+  "per_prompt": [
+    {
+      "prompt_idx": 0,
+      "settle_loop": 3,
+      "final_token": 14,
+      "token_by_loop": [
+        290,
+        30749,
+        14,
+        14,
+        14,
+        14,
+        14,
+        14
+      ]
+    },
+    {
+      "prompt_idx": 1,
+      "settle_loop": 4,
+      "final_token": 201,
+      "token_by_loop": [
+        538,
+        201,
+        538,
+        201,
+        201,
+        201,
+        201,
+        201
+      ]
+    },
+    {
+      "prompt_idx": 2,
+      "settle_loop": 1,
+      "final_token": 7798,
+      "token_by_loop": [
+        7798,
+        7798,
+        7798,
+        7798,
+        7798,
+        7798,
+        7798,
+        7798
+      ]
+    },
+    {
+      "prompt_idx": 3,
+      "settle_loop": 1,
+      "final_token": 201,
+      "token_by_loop": [
+        201,
+        201,
+        201,
+        201,
+        201,
+        201,
+        201,
+        201
+      ]
+    },
+    {
+      "prompt_idx": 4,
+      "settle_loop": 8,
+      "final_token": 201,
+      "token_by_loop": [
+        5615,
+        2060,
+        8650,
+        960,
+        201,
+        2060,
+        2060,
+        201
+      ]
+    },
+    {
+      "prompt_idx": 5,
+      "settle_loop": 4,
+      "final_token": 1463,
+      "token_by_loop": [
+        201,
+        1273,
+        8863,
+        1463,
+        1463,
+        1463,
+        1463,
+        1463
+      ]
+    },
+    {
+      "prompt_idx": 6,
+      "settle_loop": 1,
+      "final_token": 624,
+      "token_by_loop": [
+        624,
+        624,
+        624,
+        624,
+        624,
+        624,
+        624,
+        624
+      ]
+    },
+    {
+      "prompt_idx": 7,
+      "settle_loop": 1,
+      "final_token": 201,
+      "token_by_loop": [
+        201,
+        201,
+        201,
+        201,
+        201,
+        201,
+        201,
+        201
+      ]
+    }
+  ]
+}
