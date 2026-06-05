@@ -138,6 +138,19 @@ walk to the fixed point; SLD needs ~2 (it drafts the converged state and verifie
 in one batched pass). This is the convergent-loop analog of the headline result,
 against a baseline that is *not* trivially defeated.
 
+**Deep recurrence — the gap keeps widening** (`bench/convergent_deep.py`, a deep
+contracting map with depth-to-root up to 23): SLD stays ~constant while early-exit
+grows linearly, so the advantage scales without bound — exactly the regime deep
+recurrent-depth LMs (Huginn's 32–132 unrolls) live in:
+
+| depth-to-root | early-exit rounds | **SLD rounds** | **SLD vs early-exit** | lossless |
+|--:|--:|--:|--:|:--:|
+| 4  | 4  | 2.0 | 2.0× | ✓ |
+| 8  | 8  | 2.0 | 4.0× | ✓ |
+| 12 | 12 | 1.5 | 8.1× | ✓ |
+| 16 | 16 | 1.5 | 10.6× | ✓ |
+| 23 | 23 | 2.0 | **11.5×** | ✓ |
+
 ## 8. Generality probe: in-context (non-memorizable) map
 
 To check that the win is not a memorization artifact, `bench/incontext.py` makes
