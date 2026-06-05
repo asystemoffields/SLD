@@ -117,6 +117,13 @@ print("[ok] adapter validated on real parcae (GPU).")
 """)
 
 md(r"""
+> **Inputs.** parcae's tokenizer isn't bundled with the 140m checkpoint, so the
+> cells below use valid *random* token ids — the loop's convergence is a property
+> of the model on its input regardless. If you have parcae's tokenizer, swap in
+> real text, e.g.
+> `ids = tok("The capital of France is", return_tensors="pt").input_ids.to(DEV)`,
+> and everything else is unchanged.
+
 ## 2. parcae converges — quantify the redundancy
 """)
 
