@@ -45,9 +45,13 @@ print("torch", torch.__version__, "| GPU:", torch.cuda.get_device_name(0))
 """)
 
 code(r"""
-# parcae's REAL package is the GitHub source (the PyPI 'parcae-lm' is an empty stub);
-# the tokenizer is a separate repo; datasets pulls the benchmarks.
-!pip -q install "git+https://github.com/sandyresearch/parcae" einops safetensors tokenizers transformers datasets >/dev/null 2>&1
+# parcae's REAL package is the GitHub source (the PyPI 'parcae-lm' is an empty stub).
+# Install it WITHOUT deps: parcae pins numpy<2.0, which would downgrade Colab's numpy
+# and break transformers (binary incompatibility). Its other deps are training-only
+# (tensorboard/wandb/torchmetrics); parcae runs fine on numpy 2.x. Then install just
+# the runtime deps. If you already ran a numpy-downgrading install: Runtime > Restart.
+!pip -q install --no-deps "git+https://github.com/sandyresearch/parcae"
+!pip -q install einops safetensors tokenizers transformers datasets
 import parcae_lm
 from transformers import AutoTokenizer
 m = parcae_lm.from_pretrained("SandyResearch/parcae-140m").to(DEV).eval()
