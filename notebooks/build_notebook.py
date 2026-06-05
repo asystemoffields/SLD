@@ -30,11 +30,6 @@ evaluations**:
 2. **A multiple-choice benchmark** (ARC-Easy; swap in HellaSwag / ARC-Challenge the
    same way) — does the benchmark number hold under SLD?
 3. **Legible generation** — decode parcae's continuation and SLD's side by side.
-
-Why a GPU matters: SLD replaces parcae's `T` sequential core calls with fewer
-(`~warmup + verify`). On a GPU each forward is one kernel launch, so cutting the
-sequential count cuts latency directly — and the saving **grows with loop depth**
-(recurrent-depth LMs unroll 32–132×, where the full loop is far more wasteful).
 """)
 
 code(r"""
