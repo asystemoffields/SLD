@@ -213,6 +213,31 @@ loop reproduces parcae's native next-token output before reporting anything
 (`core_block_forward` is time-invariant given `_current_input_ids`; the decode
 path is `C → coda → ln_f → lm_head·logit_scale`).
 
+**LAMBADA — a benchmark from parcae's own eval configs** (`eval-lambada.yaml`),
+run head-to-head full-loop vs SLD (`bench/parcae_lambada.py`, 200 examples, CPU):
+
+| method | LAMBADA acc | matches full loop | core rounds | CPU ms/ex | speedup |
+|---|--:|--:|--:|--:|--:|
+| full loop | 0.535 | — | 8 | 181 | 1.00× |
+| SLD (faithful) | **0.535** | 96.5% | 5.25 | 277 | 0.66× |
+| **SLD (fast)** | 0.530 | 92.0% | 4.0 | 126 | **1.44×** |
+| early-exit | 0.520 | 93.0% | 3.68 | 269 | 0.68× |
+
+**SLD preserves parcae's benchmark accuracy** (full 0.535; SLD-faithful 0.535,
+SLD-fast 0.530) — and beats naive **early-exit, which *degrades* accuracy to
+0.520**. Two SLD modes give a quality/speed knob:
+- **faithful** (verify on the next-token readout): 96.5% of predictions identical
+  to the full loop, but the per-step decode (coda+head) makes it *slower* than
+  parcae's short `T=8` loop on CPU (0.66×).
+- **fast** (verify on the cheap state residual `‖step(s)−s‖`, decode once):
+  **1.44× faster on CPU** at 4 core rounds, accuracy preserved — and faster than
+  early-exit, which also decodes every step.
+
+So the honest compute/wall-clock picture on a real benchmark: SLD saves recurrent
+core calls (8 → 4–5.25) and **preserves accuracy**; the *wall-clock* win on CPU
+needs the cheap-verification mode (1.44×), and both modes' core-call saving
+becomes latency on GPU (parallel verify) and grows with loop depth.
+
 **Real English text (the non-synthetic check).** Using parcae's own tokenizer
 (`SandyResearch/parcae-tokenizer`), `bench/parcae_nl.py` scores parcae on real
 English passages: next-token **top-1 accuracy 0.51, perplexity 7.5** (sensible for

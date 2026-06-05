@@ -1,0 +1,32 @@
+{
+  "n": 200,
+  "T": 8,
+  "acc": {
+    "full": 0.535,
+    "sld_faithful": 0.535,
+    "sld_fast": 0.53,
+    "early_exit": 0.52
+  },
+  "matches_full_loop": {
+    "sld_faithful": 0.965,
+    "sld_fast": 0.92,
+    "early_exit": 0.93
+  },
+  "mean_rounds": {
+    "full": 8,
+    "sld_faithful": 5.245,
+    "sld_fast": 4.0,
+    "early_exit": 3.68
+  },
+  "wall_ms": {
+    "full": 181.34759152366314,
+    "sld_faithful": 276.72451836981054,
+    "sld_fast": 125.71084202470956,
+    "early_exit": 268.6284295891528
+  },
+  "wallclock_speedup_cpu": {
+    "sld_faithful": 0.6553361899118492,
+    "sld_fast": 1.4425771763426554,
+    "early_exit": 0.6750871149454315
+  }
+}

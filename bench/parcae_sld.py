@@ -100,6 +100,26 @@ def earlyexit(loop, ids, T, patience=2):
     return prev, T
 
 
+@torch.no_grad()
+def sld_cheap(loop, ids, T, warmup=2, tol=0.15):
+    """Faster SLD: detect convergence on the CHEAP state residual ||step(s)-s||
+    (no per-step decode), extrapolate, accept when the residual is a small fraction
+    of the first step's residual; decode ONCE at the end. Returns (token, rounds)."""
+    x, e, fc = loop.encode(ids); hs = [x]; r = 0
+    nx = loop.step(x, e, fc); r += 1; hs.append(nx)
+    r0 = (nx - x).flatten(1).norm(dim=1)                 # first-step residual (scale)
+    x = nx
+    for _ in range(warmup - 1):
+        nx = loop.step(x, e, fc); r += 1; hs.append(nx); x = nx
+    while r < T:
+        s = aitken(hs[-3], hs[-2], hs[-1]) if len(hs) >= 3 else hs[-1]
+        cs = loop.step(s, e, fc); r += 1                 # one core step (no decode)
+        if ((cs - s).flatten(1).norm(dim=1) <= tol * r0).all():
+            return loop.decode(cs, ids, fc).argmax(-1), r   # converged -> decode once
+        hs.append(cs)
+    return loop.decode(hs[-1], ids, fc).argmax(-1), r
+
+
 def main():
     import parcae_lm
     torch.set_num_threads(6)
