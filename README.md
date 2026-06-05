@@ -90,8 +90,21 @@ bench/
   experiment.py  the frontier experiment (depth, horizon, baselines, wall-clock)
   common.py      checkpoint + timing helpers
 tests/           losslessness + control invariants
+notebooks/       sld_parcae_gpu.ipynb — take SLD to a GPU on a real looped LM (parcae)
 SLD_SPEC.md      the method, losslessness proof sketch, prior art, falsification bar
 ```
+
+## GPU / real model (parcae)
+
+`notebooks/sld_parcae_gpu.ipynb` is a self-contained Colab notebook that applies
+SLD to [`parcae`](https://github.com/sandyresearch/parcae) (a pretrained *stable
+looped LM*, recurrence `T=8`, contractive core) on a GPU — the regime where the
+batched verify stays parallel, so SLD's fewer *sequential* core rounds become a
+real **latency** win at serving batch (the win the CPU experiment could not show).
+It builds a self-validating adapter (it asserts the reconstructed loop matches
+parcae's native output before any SLD claim) and measures losslessness, core
+rounds, and wall-clock at batch 1/16/64. Regenerate it with
+`python notebooks/build_notebook.py`.
 
 ## Honest scope
 
