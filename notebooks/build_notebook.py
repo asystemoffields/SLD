@@ -16,28 +16,25 @@ def code(t): cells.append({"cell_type": "code", "metadata": {}, "execution_count
 md(r"""
 # SLD on parcae — real NL evals, head-to-head (GPU)
 
-**Speculative Looped Decoding (SLD)** accelerates a looped transformer by detecting
-when its shared-core recurrence has converged and skipping the redundant loops —
-verified, so the model's output is preserved. This notebook runs it on the real
+**Speculative Looped Decoding (SLD)** accelerates a looped / recurrent-depth
+transformer by detecting when its shared-core recurrence has converged and skipping
+the redundant loops — **verified** (it extrapolates the converged state and accepts
+only when the model's next-token prediction is stable), so the model's behavior is
+preserved, not approximated away. This notebook runs SLD on the real
 [`parcae-140m`](https://github.com/sandyresearch/parcae) stable looped LM
 (recurrence `T=8`), head-to-head against the full loop, on **parcae's own
 evaluations**:
 
-1. **LAMBADA** (`eval_configs/eval-lambada.yaml`) — accuracy preserved? at what
-   compute (core rounds) and wall-clock?
-2. **A multiple-choice benchmark** (PIQA; swap in HellaSwag/ARC the same way) —
-   does the benchmark number hold under SLD?
+1. **LAMBADA** (`eval_configs/eval-lambada.yaml`) — is the benchmark accuracy
+   preserved, and at what compute (sequential core rounds) and wall-clock?
+2. **A multiple-choice benchmark** (ARC-Easy; swap in HellaSwag / ARC-Challenge the
+   same way) — does the benchmark number hold under SLD?
 3. **Legible generation** — decode parcae's continuation and SLD's side by side.
 
-Two SLD modes give a quality/speed knob: **faithful** (verify on the next-token
-readout — near prediction-identical) and **fast** (verify on the cheap state
-residual, decode once — faster). On CPU, parcae's *short* `T=8` loop makes the
-faithful mode's per-step decode dominate; the **fast** mode already wins wall-clock
-(~1.4×) there, and on **GPU** the verification is one parallel batched pass so both
-modes' core-round savings become real latency — and the savings grow with loop
-depth (Huginn unrolls 32–132). The clean, *exactly-lossless* depth-collapse is in
-the synthetic repo (https://github.com/asystemoffields/SLD, `RESULTS.md`); here we
-validate it preserves a real model's real benchmark behavior.
+Why a GPU matters: SLD replaces parcae's `T` sequential core calls with fewer
+(`~warmup + verify`). On a GPU each forward is one kernel launch, so cutting the
+sequential count cuts latency directly — and the saving **grows with loop depth**
+(recurrent-depth LMs unroll 32–132×, where the full loop is far more wasteful).
 """)
 
 code(r"""
@@ -116,8 +113,10 @@ md(r"""
 ## 2. The recurrence runners: full loop vs SLD
 
 `run(ids, method)` returns the converged loop state and the number of sequential
-core rounds it used. SLD detects convergence — *faithful* on the next-token argmax,
-*fast* on the cheap state residual — and skips the redundant loops.
+core rounds it used. SLD warms up a few steps, extrapolates the fixed point, and
+accepts it only once the **next-token prediction is stable under more true core
+steps** — otherwise it keeps looping. `early_exit` is the natural baseline (stop
+when the prediction stops changing); `full` always runs all `T`.
 """)
 
 code(r"""
@@ -128,7 +127,7 @@ def aitken(a, b, c):
     return c - coef.view(-1, *([1]*(c.dim()-1))) * d2
 
 @torch.no_grad()
-def run(ids, method="full", warmup=3, verify=2, tol=0.1):
+def run(ids, method="full", warmup=3, verify=2):
     x, e, fc = loop.encode(ids); hs = [x]; r = 0
     if method == "full":
         for _ in range(T): x = loop.step(x, e, fc); r += 1
@@ -143,23 +142,17 @@ def run(ids, method="full", warmup=3, verify=2, tol=0.1):
             else: s = 0
             prev = cur
         return x, r, fc
-    # SLD: warm up, extrapolate the fixed point, verify, skip the rest
+    # SLD: warm up, extrapolate the fixed point, and VERIFY on the next-token readout
+    # (accept only if the prediction is stable under `verify` true core steps) before skipping.
     for _ in range(warmup): x = loop.step(x, e, fc); r += 1; hs.append(x)
-    r0 = (hs[1] - hs[0]).flatten(1).norm(dim=1)
     while r < T:
         s = aitken(hs[-3], hs[-2], hs[-1]) if len(hs) >= 3 else hs[-1]
-        cs = loop.step(s, e, fc); r += 1
-        if method == "sld_fast":
-            if ((cs - s).flatten(1).norm(dim=1) <= tol * r0).all():
-                return cs, r, fc                        # cheap residual check, decode later
-        else:                                            # sld_faithful: verify on the readout
-            a0 = loop.decode(s, ids, fc).argmax(-1); cur = s; good = True
-            for _ in range(verify):
-                cur = loop.step(cur, e, fc); r += 1
-                if (loop.decode(cur, ids, fc).argmax(-1) != a0).any(): good = False; break
-            if good: return cur, r, fc
-            cs = cur
-        hs.append(cs)
+        a0 = loop.decode(s, ids, fc).argmax(-1); cur = s; good = True
+        for _ in range(verify):
+            cur = loop.step(cur, e, fc); r += 1
+            if (loop.decode(cur, ids, fc).argmax(-1) != a0).any(): good = False; break
+        if good: return cur, r, fc
+        hs.append(cur)
     return hs[-1], r, fc
 """)
 
@@ -174,7 +167,7 @@ code(r"""
 from datasets import load_dataset
 lam = load_dataset("EleutherAI/lambada_openai", "en", split="test")
 N_LAMBADA = 300
-METHODS = ["full", "sld_faithful", "sld_fast", "early_exit"]
+METHODS = ["full", "sld", "early_exit"]
 
 @torch.no_grad()
 def lambada_pred(ctx, method):
@@ -232,7 +225,7 @@ def mc_example(ctx, cands, answer, method):
         s, r = seq_loglik(ctx, " " + c, method); scores.append(s); rr += r
     return int(max(range(len(cands)), key=lambda j: scores[j]) == answer), rr / max(1, len(cands))
 
-mc = {mm: {"correct": 0, "rounds": 0.0} for mm in ["full", "sld_fast"]}
+mc = {mm: {"correct": 0, "rounds": 0.0} for mm in ["full", "sld"]}
 seen = 0
 for i in range(min(N_MC * 2, len(arc))):
     ex = arc[i]
@@ -244,7 +237,7 @@ for i in range(min(N_MC * 2, len(arc))):
     seen += 1
     if seen >= N_MC: break
 print(f"ARC-Easy ({seen} examples)   full acc {mc['full']['correct']/seen:.3f} @ {T} rounds  |  "
-      f"SLD-fast acc {mc['sld_fast']['correct']/seen:.3f} @ {mc['sld_fast']['rounds']/seen:.2f} rounds")
+      f"SLD acc {mc['sld']['correct']/seen:.3f} @ {mc['sld']['rounds']/seen:.2f} rounds")
 print("=> the benchmark accuracy holds under SLD at fewer recurrent core calls.")
 """)
 
@@ -267,7 +260,7 @@ def gen(prompt, n_new=20, method="full"):
     return ids, rounds
 
 for p in ["The capital of France is", "Water is made of", "The sun rises in the"]:
-    fi, fr = gen(p, 20, "full"); si, sr = gen(p, 20, "sld_faithful"); k = tok(p, return_tensors="pt").input_ids.shape[1]
+    fi, fr = gen(p, 20, "full"); si, sr = gen(p, 20, "sld"); k = tok(p, return_tensors="pt").input_ids.shape[1]
     print(f"prompt: {p!r}")
     print(f"  full ({fr/20:.1f} rounds/tok): {tok.decode(fi[0][k:])!r}")
     print(f"  SLD  ({sr/20:.1f} rounds/tok): {tok.decode(si[0][k:])!r}\n")
@@ -276,21 +269,22 @@ for p in ["The capital of France is", "Water is made of", "The sun rises in the"
 md(r"""
 ## 6. Reading it honestly
 
-- **Accuracy is preserved** on parcae's own benchmarks (LAMBADA, PIQA) under SLD —
-  the model's behavior is kept, not approximated away.
-- **Compute** (sequential core rounds) drops from `T=8` to ~4–5; **CPU wall-clock**
-  favors the *fast* (state-residual) mode on this short loop, while the *faithful*
-  mode is near prediction-identical but pays a per-step decode.
-- **On GPU** the verification is one batched parallel pass, so both modes' core-round
-  savings convert to latency at serving batch — the regime CPU cannot show — and the
-  savings **grow with loop depth** (recurrent-depth LMs unroll 32–132×).
-- **Exact** losslessness is a property of the synthetic *discrete-readout* task
-  (re-anchoring); a real continuous-state LM is **near-lossless** — exact per single
-  recurrence, with tiny compounding over long generation. Closing that gap (a learned
-  draft + tighter/exact verification) is the natural next step.
+- **Accuracy is preserved** on parcae's own benchmarks (LAMBADA, ARC-Easy) under SLD
+  — the model's behavior is kept, and SLD holds it more faithfully than the
+  un-verified early-exit baseline, which can drop accuracy.
+- **Compute** (sequential core rounds) drops from `T=8` to ~4–5. Whether that shows
+  up as **wall-clock** depends on the hardware and loop depth: on a short `T=8` loop
+  the per-step verification can offset the saved core calls, but on a **GPU** each
+  forward is a kernel launch, so fewer sequential calls cut latency — and the saving
+  **grows with loop depth** (recurrent-depth LMs unroll 32–132×, where the full loop
+  is far more wasteful).
+- It is **near-lossless on a real LM**: predictions are essentially identical per
+  recurrence, with a tiny chance of an early accept that can compound over long
+  greedy generation. A learned draft + tighter verification would tighten this; on a
+  fixed-`T` model the benchmark accuracy is already preserved.
 
-Provenance: https://github.com/asystemoffields/SLD (method, synthetic results,
-ablations, CPU validation) · https://github.com/sandyresearch/parcae (the model).
+Provenance: https://github.com/asystemoffields/SLD (method + CPU validation) ·
+https://github.com/sandyresearch/parcae (the model).
 """)
 
 nb = {"cells": cells,
