@@ -1,0 +1,47 @@
+[
+  {
+    "k": 1,
+    "full_acc": 0.34765625,
+    "sld_acc": 0.34765625,
+    "sld_lossless": 1.0,
+    "sld_rounds": 1.0,
+    "mean_accept": 0.294921875,
+    "draftonly_acc": 0.3515625
+  },
+  {
+    "k": 2,
+    "full_acc": 0.32421875,
+    "sld_acc": 0.34765625,
+    "sld_lossless": 0.7734375,
+    "sld_rounds": 1.7265625,
+    "mean_accept": 0.3178733031674208,
+    "draftonly_acc": 0.349609375
+  },
+  {
+    "k": 3,
+    "full_acc": 0.36328125,
+    "sld_acc": 0.36328125,
+    "sld_lossless": 0.9921875,
+    "sld_rounds": 2.40625,
+    "mean_accept": 0.362012987012987,
+    "draftonly_acc": 0.357421875
+  },
+  {
+    "k": 4,
+    "full_acc": 0.4765625,
+    "sld_acc": 0.515625,
+    "sld_lossless": 0.693359375,
+    "sld_rounds": 3.076171875,
+    "mean_accept": 0.38857142857142857,
+    "draftonly_acc": 0.513671875
+  },
+  {
+    "k": 5,
+    "full_acc": 0.400390625,
+    "sld_acc": 0.400390625,
+    "sld_lossless": 0.994140625,
+    "sld_rounds": 3.8359375,
+    "mean_accept": 0.4088594704684318,
+    "draftonly_acc": 0.400390625
+  }
+]

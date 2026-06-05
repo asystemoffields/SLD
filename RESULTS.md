@@ -110,7 +110,62 @@ The pre-registered bar (`SLD_SPEC.md` §"Falsification bar") — all six survive
 | 5 | Pareto-dominates the lossy one-shot ancestor | ✓ same accuracy in-dist, lossless OOD where it collapses |
 | 6 | net of draft cost, speedup > 1× | ✓ draft cost included in the 1.6 ms |
 
-## 7. Honest scope & limitations
+## 7. Convergent loop — SLD vs a *fair* early-exit
+
+The headline task is a permutation (non-converging) loop, where early-exit is
+structurally useless. To answer the obvious objection — "real looped LMs
+converge, where early-exit *does* help" — `bench/convergent.py` swaps the
+permutation for a **contracting map** (a functional graph whose roots are fixed
+points), so `f^k(start)` climbs to a root and then **holds**. The loop genuinely
+converges, so convergence early-exit is now a strong, fair baseline (it stops at
+the root). SLD still wins — it *leaps* the climb that early-exit walks one step
+at a time — and the advantage **grows with depth-to-root**. Teacher 100% exact,
+draft 100%, everything exactly lossless:
+
+| depth-to-root | n | full-loop | early-exit (fair) | **SLD** | **SLD vs early-exit** | lossless |
+|--:|--:|--:|--:|--:|--:|:--:|
+| 2 | 478 | 18 | 2 | **2** | 1.0× | ✓ |
+| 3 | 681 | 18 | 3 | **2** | 1.5× | ✓ |
+| 4 | 370 | 18 | 4 | **2** | 2.0× | ✓ |
+| 5 | 400 | 18 | 5 | **2** | 2.5× | ✓ |
+| 6 | 191 | 18 | 6 | **2** | 3.0× | ✓ |
+| 7 |  86 | 18 | 7 | **2** | **3.5×** | ✓ |
+
+(depth-1 is degenerate: the teacher already decodes the 1-hop answer at step 0, so
+early-exit exits in 0 rounds and SLD's single round is not justified — the win is
+for genuinely deep recurrence.) Early-exit needs `O(depth)` sequential rounds to
+walk to the fixed point; SLD needs ~2 (it drafts the converged state and verifies
+in one batched pass). This is the convergent-loop analog of the headline result,
+against a baseline that is *not* trivially defeated.
+
+## 8. Generality probe: in-context (non-memorizable) map
+
+To check that the win is not a memorization artifact, `bench/incontext.py` makes
+the permutation **different for every example** and supplies it in the prompt as
+shuffled (key, value) pairs; the answer is `f^k(start)` for *that* example's `f`.
+A draft cannot memorize `f^i` — it must read the map out of the state and compose
+it (so the draft is an attention network). Re-anchoring is generalized: rebuild
+the prompt with the current node as the new start (the map — the rest of the
+prompt — is the sufficient statistic alongside the node).
+
+The mechanism is implemented and runs, but the finding is a **limitation, and an
+informative one**: a 0.4M-param looped teacher trained from scratch on CPU could
+only reach ~36% exact-match on in-context multi-hop chasing (≈85% *per hop*,
+compounding). At that quality the teacher does **not** satisfy the
+*readout-Markov* property that re-anchoring relies on — `readout(core(state))`
+is no longer a clean function of `readout(state)` — so SLD's losslessness
+degrades (0.69–0.99 across `k` instead of 1.000). The clean fixed-permutation and
+convergent teachers (≈100%) satisfy readout-Markov and are exactly lossless; the
+in-context teacher is simply too weak on CPU to learn the task.
+
+Takeaway: SLD's clean-lossless regime needs a *competent* teacher. The
+re-anchoring generalizes to per-example context, but a CPU-scale teacher cannot
+learn arbitrary in-context composition well enough — exactly the kind of teacher
+quality a GPU run (or a pretrained looped LM) would provide. This is the most
+concrete argument for the GPU/parcae "v2": the bottleneck here is teacher
+capacity, not the SLD mechanism.
+
+## 9. Honest scope & limitations
 
 - **Discrete-readout regime.** Losslessness is rigorous because acceptance is on
   the argmax symbol and the symbolic recurrence is readout-Markov; re-anchoring

@@ -78,8 +78,8 @@ def make_reanchor(model, spec):
             toks[:, p] = spec.REG0
         table = model.encode(toks)               # [N, T, d] cached input encodings
 
-    def reanchor(symbols: torch.Tensor) -> torch.Tensor:
-        return table[symbols]
+    def reanchor(symbols: torch.Tensor, ex_idx=None) -> torch.Tensor:
+        return table[symbols]                    # map is global -> example index unused
     return reanchor
 
 
@@ -226,8 +226,14 @@ def sld_decode(
             else:
                 G = draft.propose(ha, h0a, win)
                 read_g = _readout(model, G.reshape(nb * win, T, d)).reshape(nb, win)
-            Ghat = reanchor_encode(read_g[:, :win - 1].reshape(-1)).reshape(nb, win - 1, T, d) \
-                if win > 1 else ha[:, :0].reshape(nb, 0, T, d)
+            # re-anchor each drafted symbol to its canonical on-manifold state. For
+            # per-example context (e.g. an in-context map), reanchor_encode also takes
+            # the example index so it can reconstruct the right state.
+            if win > 1:
+                ex = idx.unsqueeze(1).expand(nb, win - 1).reshape(-1)
+                Ghat = reanchor_encode(read_g[:, :win - 1].reshape(-1), ex).reshape(nb, win - 1, T, d)
+            else:
+                Ghat = ha[:, :0].reshape(nb, 0, T, d)
             verify_in = torch.cat([ha.unsqueeze(1), Ghat], dim=1)            # [nb,win,T,d]
             h0_rep = verify_in.reshape(nb * win, T, d)                       # each on-manifold state reinjects itself
         else:
@@ -258,7 +264,7 @@ def sld_decode(
         carry_idx = (adv - 1).clamp(min=0, max=win - 1)        # read_u col for symbol at t+adv
         new_read = read_u[torch.arange(nb), carry_idx]
         if reanchor_encode is not None:
-            new_h = reanchor_encode(new_read)         # canonical on-manifold state, exact
+            new_h = reanchor_encode(new_read, idx)    # canonical on-manifold state, exact
         else:
             new_h = U[torch.arange(nb), carry_idx]    # continuous carry (approx)
         h[idx] = new_h
