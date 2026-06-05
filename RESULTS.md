@@ -1,18 +1,138 @@
 # SLD results
 
-All numbers from `bench/experiment.py` (CPU only, AMD Ryzen 5 7530U, 6 threads,
-torch 2.12+cpu). Regenerate with `python bench/experiment.py --tag main` and
-`python bench/summarize.py main`; figure with `python bench/plot.py main`.
+**Real-model validation (parcae-140m) is the load-bearing result and comes first.**
+A controlled synthetic study follows, clearly bounded, to characterize the mechanism
+on a task where the recurrence is a clean discrete-symbol computation and the
+verifier can be made exact.
 
-Setup: fixed-permutation pointer-chasing, 32 symbols, longest cycle ≥ 30. Looped
-teacher (prelude 2 / shared time-invariant core 1 / coda 1, d=96) = **0.31M
-params, 100.0% exact-match** on every hop count. Learned draft = 0.14M params
-(state head + cheap symbol head), horizon 16, distilled on the frozen teacher's
-trajectory tape. Both train from scratch on CPU in a few minutes.
+## Real-model results — parcae-140m on its own evals
+
+`bench/parcae_cpu.py` and `bench/parcae_sld.py` run on the actual pretrained
+[`parcae-140m`](https://github.com/sandyresearch/parcae) stable looped LM
+(recurrence `T=8`, contractive core) — on this CPU box (it loads in ~60s, 144M
+params; the GitHub package, not the empty PyPI stub). We reconstruct parcae's
+loop as `encode`/`step`/`decode` from its own modules and **assert** the manual
+loop reproduces parcae's native next-token output before reporting anything
+(`core_block_forward` is time-invariant given `_current_input_ids`; the decode
+path is `C → coda → ln_f → lm_head·logit_scale`).
+
+**LAMBADA — a benchmark from parcae's own eval configs** (`eval-lambada.yaml`),
+run head-to-head full-loop vs SLD (`bench/parcae_lambada.py`, 200 examples, CPU):
+
+| method | LAMBADA acc | matches full loop | core rounds | CPU ms/ex |
+|---|--:|--:|--:|--:|
+| full loop | 0.535 | — | 8 | 181 |
+| **SLD** | **0.535** | 96.5% | 5.25 | 277 |
+| early-exit | 0.520 | 93.0% | 3.68 | 269 |
+
+**SLD preserves parcae's benchmark accuracy** (0.535 → 0.535) at ~5 of 8 core
+rounds, and holds it *more faithfully than the un-verified early-exit baseline*,
+which drops to 0.520 (its halting accepts states SLD's verification rejects).
+
+On compute/wall-clock: SLD cuts recurrent core calls (8 → 5.25) and preserves
+accuracy. Whether that shows up as *wall-clock* depends on hardware and loop depth
+— on parcae's short `T=8` loop the per-step verification (a coda+head decode)
+offsets the saved core calls on CPU; the saving converts to **latency on a GPU**
+(each forward is a kernel launch) and **grows with loop depth** (recurrent-depth
+LMs unroll 32–132×).
+
+**Real English text (the non-synthetic check).** Using parcae's own tokenizer
+(`SandyResearch/parcae-tokenizer`), `bench/parcae_nl.py` scores parcae on real
+English passages: next-token **top-1 accuracy 0.51, perplexity 7.5** (sensible for
+a 140M model — the model is doing real language modeling, not garbage). Then
+lossless early-exit and SLD are run on the same recurrence:
+
+| method | rounds | matches full loop (next token, all positions) |
+|---|--:|--:|
+| full loop | 8 | — (reference) |
+| early-exit | 6.5 | **115/115 (100%)** |
+| SLD | 6.9 | **115/115 (100%)** |
+
+**Per single recurrence step, SLD/early-exit reproduce parcae's predictions exactly**
+(115/115 positions) while using fewer sequential core rounds. And it is *legible*
+— `bench/parcae_generate.py` greedy-generates and **decodes to English**:
+
+```
+"The capital of France is" -> " Paris. It is the capital of the French Republic,
+                                the largest country in Europe, and the largest"
+"Water is made of"         -> " water molecules. Water molecules are made up of
+                                water, hydrogen, oxygen, carbon, nitrogen, and"
+```
+SLD reproduces these at ~5.2/8 core rounds per token, **exactly on 3/4 prompts
+(63/80 tokens)**.
+
+**The boundary (the important part).** Exact losslessness is a
+property of the *synthetic, discrete-readout* task: re-anchoring snaps the carried
+state back onto the trajectory manifold, so acceptance on the argmax symbol is
+bit-stable. A *real LM has continuous state with no discrete sufficient statistic*,
+so SLD there is **near-lossless, not exact** — per single recurrence it is ~100%,
+but over many autoregressive steps the fixed-point-acceptance heuristic can accept
+slightly early and the divergence compounds (3/4 generations exact above). This is
+exactly why the synthetic numbers are dramatic and the real-LM numbers are modest:
+**dramatic+exact is the discrete synthetic regime; a real model is modest+near-
+lossless.** Closing that gap on a real LM is future work (a learned draft + a
+tighter/exact verification), and is the natural next step on GPU.
+
+Further findings on parcae (random-token probes, 16 inputs):
+- **The loop converges fast.** parcae's next token settles to its full-`T` value
+  by **~2.9 of 8 loops** on average — ~5 loops are redundant.
+- **Lossless convergence early-exit:** **8 → 4.56 sequential core rounds**
+  (14/16 exactly matching the full loop; convergence detection on a fixed-`T`
+  model is a near-, not hard-, guarantee).
+- A verified fixed-point (Anderson) SLD reaches the same answers at 5.56 rounds,
+  15/16 lossless.
+
+**Redundancy grows with configured depth.** Running parcae beyond its trained
+recurrence (it supports any `T` via `num_steps_pair`) shows the skippable depth
+grows with the configured loop count — the next token stabilizes well before the
+end even out-of-distribution:
+
+| configured loops `T` | mean settle loop | redundant loops |
+|--:|--:|--:|
+| 4  | 2.3 | 1.7 |
+| 8  | 3.2 | 4.8 |
+| 16 | 7.8 | 8.2 |
+| 32 | 9.8 | **22.2** |
+
+At `T=32`, ~22 of 32 loops are redundant. (The settle point drifts later at
+out-of-distribution depths since the model was trained at `T=8`; still, the
+skippable headroom grows.) Deep recurrent-depth LMs — Huginn unrolls 32–132 —
+are therefore exactly where a lossless depth-skipper has the most to gain.
+
+**Interpretation.** On parcae's *short* `T=8`, fast-converging loop, *sequential*
+early-exit already captures the headroom on CPU; the extrapolation draft doesn't
+beat it here. SLD's distinct advantage is (a) verifying several depths **in
+parallel** (one batched core pass) → fewer *sequential* rounds at GPU serving
+batch, and (b) **deep** recurrence (e.g. Huginn's 32–132 unrolls), where leaping
+the converging phase pays off far more than on 8 loops. That is precisely what
+`notebooks/sld_parcae_gpu.ipynb` targets — and the adapter there is now the
+*validated* parcae loop, not a guess. The synthetic results (§1–9) are where
+SLD's lossless, depth-collapsing win is demonstrated cleanly; parcae confirms the
+premise on a real model — a stable looped LM does carry large, exploitable
+recurrent redundancy.
+
+
+---
+
+## Synthetic study (controlled, discrete-readout)
+
+The following experiments use a *synthetic* fixed-permutation pointer-chase, run from
+`bench/experiment.py` (CPU, AMD Ryzen 5 7530U). The recurrence is a clean
+discrete-symbol map, so the readout is a sufficient statistic and verification is
+bit-stable — which makes SLD **exactly lossless** here and lets us measure the
+mechanism's best case (e.g. collapsing a depth-`k` loop to one verified round, and a
+sequential-round advantage over early-exit that grows with depth). This is a
+controlled characterization of the method, **not** the real-world claim — a real
+continuous-state LM lacks that discrete structure, where SLD is near-lossless (see
+the real-model results above).
+
+Setup: 32 symbols, longest cycle ≥ 30. Looped teacher (prelude 2 / shared core 1 /
+coda 1, d=96) = 0.31M params, 100% exact match; learned draft 0.14M params, horizon
+16, distilled on the frozen teacher's trajectory tape.
 
 ![frontier](results/frontier_main.png)
 
-## 1. Depth sweep — the headline
+## 1. Depth sweep
 
 Running the core `k` times costs `k` sequential rounds; SLD answers in **one
 round**, exactly lossless, for every depth.
@@ -201,117 +321,6 @@ acceptance — which is exactly the lever a stronger draft (more capacity/traini
 as a GPU affords, or a draft tuned to a real model's loop) turns toward bigger
 wins. It also makes the safety property concrete: a bad or out-of-distribution
 draft can never hurt the answer, only the speed.
-
-## 10. Real model: parcae-140m on CPU (validated)
-
-`bench/parcae_cpu.py` and `bench/parcae_sld.py` run on the actual pretrained
-[`parcae-140m`](https://github.com/sandyresearch/parcae) stable looped LM
-(recurrence `T=8`, contractive core) — on this CPU box (it loads in ~60s, 144M
-params; the GitHub package, not the empty PyPI stub). We reconstruct parcae's
-loop as `encode`/`step`/`decode` from its own modules and **assert** the manual
-loop reproduces parcae's native next-token output before reporting anything
-(`core_block_forward` is time-invariant given `_current_input_ids`; the decode
-path is `C → coda → ln_f → lm_head·logit_scale`).
-
-**LAMBADA — a benchmark from parcae's own eval configs** (`eval-lambada.yaml`),
-run head-to-head full-loop vs SLD (`bench/parcae_lambada.py`, 200 examples, CPU):
-
-| method | LAMBADA acc | matches full loop | core rounds | CPU ms/ex | speedup |
-|---|--:|--:|--:|--:|--:|
-| full loop | 0.535 | — | 8 | 181 | 1.00× |
-| SLD (faithful) | **0.535** | 96.5% | 5.25 | 277 | 0.66× |
-| **SLD (fast)** | 0.530 | 92.0% | 4.0 | 126 | **1.44×** |
-| early-exit | 0.520 | 93.0% | 3.68 | 269 | 0.68× |
-
-**SLD preserves parcae's benchmark accuracy** (full 0.535; SLD-faithful 0.535,
-SLD-fast 0.530) — and beats naive **early-exit, which *degrades* accuracy to
-0.520**. Two SLD modes give a quality/speed knob:
-- **faithful** (verify on the next-token readout): 96.5% of predictions identical
-  to the full loop, but the per-step decode (coda+head) makes it *slower* than
-  parcae's short `T=8` loop on CPU (0.66×).
-- **fast** (verify on the cheap state residual `‖step(s)−s‖`, decode once):
-  **1.44× faster on CPU** at 4 core rounds, accuracy preserved — and faster than
-  early-exit, which also decodes every step.
-
-So the compute/wall-clock picture on a real benchmark: SLD saves recurrent
-core calls (8 → 4–5.25) and **preserves accuracy**; the *wall-clock* win on CPU
-needs the cheap-verification mode (1.44×), and both modes' core-call saving
-becomes latency on GPU (parallel verify) and grows with loop depth.
-
-**Real English text (the non-synthetic check).** Using parcae's own tokenizer
-(`SandyResearch/parcae-tokenizer`), `bench/parcae_nl.py` scores parcae on real
-English passages: next-token **top-1 accuracy 0.51, perplexity 7.5** (sensible for
-a 140M model — the model is doing real language modeling, not garbage). Then
-lossless early-exit and SLD are run on the same recurrence:
-
-| method | rounds | matches full loop (next token, all positions) |
-|---|--:|--:|
-| full loop | 8 | — (reference) |
-| early-exit | 6.5 | **115/115 (100%)** |
-| SLD | 6.9 | **115/115 (100%)** |
-
-**Per single recurrence step, SLD/early-exit reproduce parcae's predictions exactly**
-(115/115 positions) while using fewer sequential core rounds. And it is *legible*
-— `bench/parcae_generate.py` greedy-generates and **decodes to English**:
-
-```
-"The capital of France is" -> " Paris. It is the capital of the French Republic,
-                                the largest country in Europe, and the largest"
-"Water is made of"         -> " water molecules. Water molecules are made up of
-                                water, hydrogen, oxygen, carbon, nitrogen, and"
-```
-SLD reproduces these at ~5.2/8 core rounds per token, **exactly on 3/4 prompts
-(63/80 tokens)**.
-
-**The boundary (the important part).** Exact losslessness is a
-property of the *synthetic, discrete-readout* task: re-anchoring snaps the carried
-state back onto the trajectory manifold, so acceptance on the argmax symbol is
-bit-stable. A *real LM has continuous state with no discrete sufficient statistic*,
-so SLD there is **near-lossless, not exact** — per single recurrence it is ~100%,
-but over many autoregressive steps the fixed-point-acceptance heuristic can accept
-slightly early and the divergence compounds (3/4 generations exact above). This is
-exactly why the synthetic numbers are dramatic and the real-LM numbers are modest:
-**dramatic+exact is the discrete synthetic regime; a real model is modest+near-
-lossless.** Closing that gap on a real LM is future work (a learned draft + a
-tighter/exact verification), and is the natural next step on GPU.
-
-Further findings on parcae (random-token probes, 16 inputs):
-- **The loop converges fast.** parcae's next token settles to its full-`T` value
-  by **~2.9 of 8 loops** on average — ~5 loops are redundant.
-- **Lossless convergence early-exit:** **8 → 4.56 sequential core rounds**
-  (14/16 exactly matching the full loop; convergence detection on a fixed-`T`
-  model is a near-, not hard-, guarantee).
-- A verified fixed-point (Anderson) SLD reaches the same answers at 5.56 rounds,
-  15/16 lossless.
-
-**Redundancy grows with configured depth.** Running parcae beyond its trained
-recurrence (it supports any `T` via `num_steps_pair`) shows the skippable depth
-grows with the configured loop count — the next token stabilizes well before the
-end even out-of-distribution:
-
-| configured loops `T` | mean settle loop | redundant loops |
-|--:|--:|--:|
-| 4  | 2.3 | 1.7 |
-| 8  | 3.2 | 4.8 |
-| 16 | 7.8 | 8.2 |
-| 32 | 9.8 | **22.2** |
-
-At `T=32`, ~22 of 32 loops are redundant. (The settle point drifts later at
-out-of-distribution depths since the model was trained at `T=8`; still, the
-skippable headroom grows.) Deep recurrent-depth LMs — Huginn unrolls 32–132 —
-are therefore exactly where a lossless depth-skipper has the most to gain.
-
-**Interpretation.** On parcae's *short* `T=8`, fast-converging loop, *sequential*
-early-exit already captures the headroom on CPU; the extrapolation draft doesn't
-beat it here. SLD's distinct advantage is (a) verifying several depths **in
-parallel** (one batched core pass) → fewer *sequential* rounds at GPU serving
-batch, and (b) **deep** recurrence (e.g. Huginn's 32–132 unrolls), where leaping
-the converging phase pays off far more than on 8 loops. That is precisely what
-`notebooks/sld_parcae_gpu.ipynb` targets — and the adapter there is now the
-*validated* parcae loop, not a guess. The synthetic results (§1–9) are where
-SLD's lossless, depth-collapsing win is demonstrated cleanly; parcae confirms the
-premise on a real model — a stable looped LM does carry large, exploitable
-recurrent redundancy.
 
 ## 11. Scope & limitations
 
