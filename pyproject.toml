@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sld"
+version = "0.1.0"
+description = "Speculative Looped Decoding: lossless depth-axis speculative decoding for looped transformers"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "asystemoffields" }]
+dependencies = [
+    "torch>=2.4",
+    "numpy",
+    # The looped-transformer substrate. Install from the jumprec repo, or set
+    # JUMPREC_PATH / keep a sibling ../SMOKE checkout (see sld/substrate.py).
+    # "jumprec @ git+https://github.com/asystemoffields/jumprec",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[tool.setuptools]
+packages = ["sld"]

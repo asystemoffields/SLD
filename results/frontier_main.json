@@ -1,0 +1,409 @@
+{
+  "args": {
+    "tag": "main",
+    "n_nodes": 32,
+    "max_hops": 16,
+    "loop_steps": 20,
+    "d_model": 96,
+    "n_heads": 4,
+    "core_layers": 1,
+    "horizon": 16,
+    "teacher_steps": 1500,
+    "draft_steps": 1500,
+    "retrain": false,
+    "threads": 6
+  },
+  "teacher_acc": {
+    "overall": 1.0,
+    "hop1": 1.0,
+    "hop2": 1.0,
+    "hop3": 1.0,
+    "hop4": 1.0,
+    "hop5": 1.0,
+    "hop6": 1.0,
+    "hop7": 1.0,
+    "hop8": 1.0,
+    "hop9": 1.0,
+    "hop10": 1.0,
+    "hop11": 1.0,
+    "hop12": 1.0,
+    "hop13": 1.0,
+    "hop14": 1.0,
+    "hop15": 1.0,
+    "hop16": 1.0
+  },
+  "depth_sweep": [
+    {
+      "k": 2,
+      "full_acc": 1.0,
+      "full_rounds": 2.0,
+      "ee_rounds": 1.869140625,
+      "oracle_log2": 1,
+      "sld_rounds": 1.0,
+      "sld_rows": 2.0,
+      "sld_acc": 1.0,
+      "sld_lossless": 1.0,
+      "sld_mean_accept": 2.0,
+      "nodraft_rounds": 1.95703125,
+      "nodraft_accept": 0.03992015968063872,
+      "blind_rounds": 1.9921875,
+      "blind_accept": 0.0058823529411764705,
+      "anderson_rounds": 1.0,
+      "anderson_accept": 1.044921875,
+      "anderson_lossless": 1.0,
+      "draftonly_acc": 1.0
+    },
+    {
+      "k": 4,
+      "full_acc": 1.0,
+      "full_rounds": 4.0,
+      "ee_rounds": 3.802734375,
+      "oracle_log2": 2,
+      "sld_rounds": 1.0,
+      "sld_rows": 4.0,
+      "sld_acc": 1.0,
+      "sld_lossless": 1.0,
+      "sld_mean_accept": 4.0,
+      "nodraft_rounds": 3.939453125,
+      "nodraft_accept": 0.02181457610312345,
+      "blind_rounds": 3.984375,
+      "blind_accept": 0.004901960784313725,
+      "anderson_rounds": 1.970703125,
+      "anderson_accept": 1.0445986124876114,
+      "anderson_lossless": 1.0,
+      "draftonly_acc": 1.0
+    },
+    {
+      "k": 6,
+      "full_acc": 1.0,
+      "full_rounds": 6.0,
+      "ee_rounds": 5.76171875,
+      "oracle_log2": 3,
+      "sld_rounds": 1.0,
+      "sld_rows": 6.0,
+      "sld_acc": 1.0,
+      "sld_lossless": 1.0,
+      "sld_mean_accept": 6.0,
+      "nodraft_rounds": 5.857421875,
+      "nodraft_accept": 0.03234411470490164,
+      "blind_rounds": 5.96875,
+      "blind_accept": 0.006544502617801047,
+      "anderson_rounds": 3.88671875,
+      "anderson_accept": 0.7869346733668342,
+      "anderson_lossless": 1.0,
+      "draftonly_acc": 1.0
+    },
+    {
+      "k": 8,
+      "full_acc": 1.0,
+      "full_rounds": 8.0,
+      "ee_rounds": 7.697265625,
+      "oracle_log2": 3,
+      "sld_rounds": 1.0,
+      "sld_rows": 8.0,
+      "sld_acc": 1.0,
+      "sld_lossless": 1.0,
+      "sld_mean_accept": 8.0,
+      "nodraft_rounds": 7.77734375,
+      "nodraft_accept": 0.03264691109994977,
+      "blind_rounds": 7.96484375,
+      "blind_accept": 0.004659146640510054,
+      "anderson_rounds": 5.689453125,
+      "anderson_accept": 0.5496052179883282,
+      "anderson_lossless": 1.0,
+      "draftonly_acc": 1.0
+    },
+    {
+      "k": 10,
+      "full_acc": 1.0,
+      "full_rounds": 10.0,
+      "ee_rounds": 9.412109375,
+      "oracle_log2": 4,
+      "sld_rounds": 1.0,
+      "sld_rows": 10.0,
+      "sld_acc": 1.0,
+      "sld_lossless": 1.0,
+      "sld_mean_accept": 10.0,
+      "nodraft_rounds": 9.70703125,
+      "nodraft_accept": 0.032595573440643864,
+      "blind_rounds": 9.9609375,
+      "blind_accept": 0.0045098039215686276,
+      "anderson_rounds": 7.5625,
+      "anderson_accept": 0.41296487603305787,
+      "anderson_lossless": 1.0,
+      "draftonly_acc": 1.0
+    },
+    {
+      "k": 12,
+      "full_acc": 1.0,
+      "full_rounds": 12.0,
+      "ee_rounds": 11.08203125,
+      "oracle_log2": 4,
+      "sld_rounds": 1.0,
+      "sld_rows": 12.0,
+      "sld_acc": 1.0,
+      "sld_lossless": 1.0,
+      "sld_mean_accept": 12.0,
+      "nodraft_rounds": 11.625,
+      "nodraft_accept": 0.03494623655913978,
+      "blind_rounds": 11.908203125,
+      "blind_accept": 0.009020829916352304,
+      "anderson_rounds": 8.623046875,
+      "anderson_accept": 0.44009060022650054,
+      "anderson_lossless": 1.0,
+      "draftonly_acc": 1.0
+    },
+    {
+      "k": 14,
+      "full_acc": 1.0,
+      "full_rounds": 14.0,
+      "ee_rounds": 12.998046875,
+      "oracle_log2": 4,
+      "sld_rounds": 1.0,
+      "sld_rows": 14.0,
+      "sld_acc": 1.0,
+      "sld_lossless": 1.0,
+      "sld_mean_accept": 14.0,
+      "nodraft_rounds": 13.619140625,
+      "nodraft_accept": 0.030402982934174674,
+      "blind_rounds": 13.91796875,
+      "blind_accept": 0.0068762278978389,
+      "anderson_rounds": 10.54296875,
+      "anderson_accept": 0.3610596517228603,
+      "anderson_lossless": 1.0,
+      "draftonly_acc": 1.0
+    },
+    {
+      "k": 16,
+      "full_acc": 1.0,
+      "full_rounds": 16.0,
+      "ee_rounds": 15.115234375,
+      "oracle_log2": 4,
+      "sld_rounds": 1.0,
+      "sld_rows": 16.0,
+      "sld_acc": 1.0,
+      "sld_lossless": 1.0,
+      "sld_mean_accept": 16.0,
+      "nodraft_rounds": 15.51953125,
+      "nodraft_accept": 0.03297256481248427,
+      "blind_rounds": 15.91015625,
+      "blind_accept": 0.006260741468205254,
+      "anderson_rounds": 12.58984375,
+      "anderson_accept": 0.30111697176543595,
+      "anderson_lossless": 1.0,
+      "draftonly_acc": 1.0
+    }
+  ],
+  "lengthgen": [
+    {
+      "k": 12,
+      "in_train": true,
+      "draftonly_acc": 1.0,
+      "sld_acc": 1.0,
+      "sld_lossless": 1.0,
+      "sld_rounds": 1.0
+    },
+    {
+      "k": 14,
+      "in_train": true,
+      "draftonly_acc": 1.0,
+      "sld_acc": 1.0,
+      "sld_lossless": 1.0,
+      "sld_rounds": 1.0
+    },
+    {
+      "k": 16,
+      "in_train": true,
+      "draftonly_acc": 1.0,
+      "sld_acc": 1.0,
+      "sld_lossless": 1.0,
+      "sld_rounds": 1.0
+    },
+    {
+      "k": 18,
+      "in_train": false,
+      "draftonly_acc": 0.029296875,
+      "sld_acc": 1.0,
+      "sld_lossless": 1.0,
+      "sld_rounds": 2.0
+    },
+    {
+      "k": 20,
+      "in_train": false,
+      "draftonly_acc": 0.03515625,
+      "sld_acc": 1.0,
+      "sld_lossless": 1.0,
+      "sld_rounds": 2.0
+    }
+  ],
+  "horizon_sweep": [
+    {
+      "horizon": 1,
+      "rounds": 16.0,
+      "rows": 16.0,
+      "lossless": 1.0,
+      "mean_accept": 1.0
+    },
+    {
+      "horizon": 2,
+      "rounds": 8.0,
+      "rows": 16.0,
+      "lossless": 1.0,
+      "mean_accept": 2.0
+    },
+    {
+      "horizon": 4,
+      "rounds": 4.0,
+      "rows": 16.0,
+      "lossless": 1.0,
+      "mean_accept": 4.0
+    },
+    {
+      "horizon": 8,
+      "rounds": 2.0,
+      "rows": 16.0,
+      "lossless": 1.0,
+      "mean_accept": 8.0
+    },
+    {
+      "horizon": 16,
+      "rounds": 1.0,
+      "rows": 16.0,
+      "lossless": 1.0,
+      "mean_accept": 16.0
+    }
+  ],
+  "wallclock_b1": [
+    {
+      "k": 2,
+      "full_ms": 0.8518639951944351,
+      "sld_ms": 1.4084040012676269,
+      "speedup": 0.604843492653897,
+      "per_query_full_ms": 0.8518639951944351,
+      "per_query_sld_ms": 1.4084040012676269
+    },
+    {
+      "k": 4,
+      "full_ms": 1.2431759969331324,
+      "sld_ms": 1.4500029938062653,
+      "speedup": 0.8573609863175448,
+      "per_query_full_ms": 1.2431759969331324,
+      "per_query_sld_ms": 1.4500029938062653
+    },
+    {
+      "k": 6,
+      "full_ms": 1.5888019988778979,
+      "sld_ms": 1.4754610019735992,
+      "speedup": 1.0768173450553367,
+      "per_query_full_ms": 1.5888019988778979,
+      "per_query_sld_ms": 1.4754610019735992
+    },
+    {
+      "k": 8,
+      "full_ms": 1.9220260001020506,
+      "sld_ms": 1.4984529989305884,
+      "speedup": 1.2826735316181133,
+      "per_query_full_ms": 1.9220260001020506,
+      "per_query_sld_ms": 1.4984529989305884
+    },
+    {
+      "k": 10,
+      "full_ms": 2.2643059928668663,
+      "sld_ms": 1.5186410018941388,
+      "speedup": 1.491008072377007,
+      "per_query_full_ms": 2.2643059928668663,
+      "per_query_sld_ms": 1.5186410018941388
+    },
+    {
+      "k": 12,
+      "full_ms": 2.6103829877683893,
+      "sld_ms": 1.564396996400319,
+      "speedup": 1.6686192787220164,
+      "per_query_full_ms": 2.6103829877683893,
+      "per_query_sld_ms": 1.564396996400319
+    },
+    {
+      "k": 14,
+      "full_ms": 2.9622820002259687,
+      "sld_ms": 1.5847440081415698,
+      "speedup": 1.869249534945293,
+      "per_query_full_ms": 2.9622820002259687,
+      "per_query_sld_ms": 1.5847440081415698
+    },
+    {
+      "k": 16,
+      "full_ms": 3.3139800070784986,
+      "sld_ms": 1.5972779947333038,
+      "speedup": 2.0747672089677986,
+      "per_query_full_ms": 3.3139800070784986,
+      "per_query_sld_ms": 1.5972779947333038
+    }
+  ],
+  "wallclock_b64": [
+    {
+      "k": 2,
+      "full_ms": 2.002547000302002,
+      "sld_ms": 2.8451219986891374,
+      "speedup": 0.7038527701886443,
+      "per_query_full_ms": 0.03128979687971878,
+      "per_query_sld_ms": 0.04445503122951777
+    },
+    {
+      "k": 4,
+      "full_ms": 2.6824580127140507,
+      "sld_ms": 3.8733560068067163,
+      "speedup": 0.6925410439939216,
+      "per_query_full_ms": 0.04191340644865704,
+      "per_query_sld_ms": 0.06052118760635494
+    },
+    {
+      "k": 6,
+      "full_ms": 3.4724160068435594,
+      "sld_ms": 5.036472008214332,
+      "speedup": 0.6894540466382331,
+      "per_query_full_ms": 0.054256500106930616,
+      "per_query_sld_ms": 0.07869487512834894
+    },
+    {
+      "k": 8,
+      "full_ms": 4.119406992685981,
+      "sld_ms": 6.2541609950130805,
+      "speedup": 0.65866660547605,
+      "per_query_full_ms": 0.06436573426071845,
+      "per_query_sld_ms": 0.09772126554707938
+    },
+    {
+      "k": 10,
+      "full_ms": 4.949089008732699,
+      "sld_ms": 7.157900996389799,
+      "speedup": 0.6914162421677599,
+      "per_query_full_ms": 0.07732951576144842,
+      "per_query_sld_ms": 0.1118422030685906
+    },
+    {
+      "k": 12,
+      "full_ms": 5.9848469973076135,
+      "sld_ms": 9.226380992913619,
+      "speedup": 0.6486667959955603,
+      "per_query_full_ms": 0.09351323433293146,
+      "per_query_sld_ms": 0.1441622030142753
+    },
+    {
+      "k": 14,
+      "full_ms": 6.752943998435512,
+      "sld_ms": 10.932782999589108,
+      "speedup": 0.6176784080219384,
+      "per_query_full_ms": 0.10551474997555488,
+      "per_query_sld_ms": 0.1708247343685798
+    },
+    {
+      "k": 16,
+      "full_ms": 7.351242995355278,
+      "sld_ms": 11.478704996989109,
+      "speedup": 0.6404244204623716,
+      "per_query_full_ms": 0.11486317180242622,
+      "per_query_sld_ms": 0.17935476557795482
+    }
+  ],
+  "elapsed_s": 22.421828204998747
+}
