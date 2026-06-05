@@ -251,10 +251,10 @@ print("=> the benchmark accuracy holds under SLD at fewer recurrent core calls."
 md(r"""
 ## 5. Legible generation — read the output
 
-Greedy-generate from a prompt with the full loop and with SLD (faithful mode, which
-tracks the full loop most closely), decoded to English. Over many autoregressive
-steps a tiny verification slip can compound, so this is *near*-lossless, not exact —
-the reality for a continuous-state real LM (see §6).
+Greedy-generate from a prompt with the full loop and with SLD, decoded to English,
+and tally the loops saved. Over many autoregressive steps a tiny verification slip
+can compound, so generation is *near*-lossless, not exact — the reality for a
+continuous-state real LM (see §6).
 """)
 
 code(r"""
@@ -266,11 +266,23 @@ def gen(prompt, n_new=20, method="full"):
         ids = torch.cat([ids, loop.decode(x, ids, fc).argmax(-1)[:, None]], 1)
     return ids, rounds
 
-for p in ["The capital of France is", "Water is made of", "The sun rises in the"]:
-    fi, fr = gen(p, 20, "full"); si, sr = gen(p, 20, "sld"); k = tok(p, return_tensors="pt").input_ids.shape[1]
+N_GEN = 20
+PROMPTS = ["The capital of France is", "Water is made of", "The sun rises in the"]
+rf = rs = 0; n_match = 0
+for p in PROMPTS:
+    k = tok(p, return_tensors="pt").input_ids.shape[1]
+    fi, frr = gen(p, N_GEN, "full"); si, srr = gen(p, N_GEN, "sld")
+    rf += frr; rs += srr; n_match += int(torch.equal(fi, si))
     print(f"prompt: {p!r}")
-    print(f"  full ({fr/20:.1f} rounds/tok): {tok.decode(fi[0][k:])!r}")
-    print(f"  SLD  ({sr/20:.1f} rounds/tok): {tok.decode(si[0][k:])!r}\n")
+    print(f"  full ({frr/N_GEN:.1f} rounds/tok): {tok.decode(fi[0][k:])!r}")
+    print(f"  SLD  ({srr/N_GEN:.1f} rounds/tok): {tok.decode(si[0][k:])!r}\n")
+
+ntok = len(PROMPTS) * N_GEN
+print(f"--- summary over {ntok} generated tokens ---")
+print(f"core loops:  full {rf}  ->  SLD {rs}   ({(1 - rs/rf)*100:.0f}% fewer; "
+      f"{rf/ntok:.1f} -> {rs/ntok:.1f} per token, identical generation on {n_match}/{len(PROMPTS)} prompts)")
+print("(wall-clock head-to-head is in the LAMBADA table above; on this short T=8 loop the saved")
+print(" core calls show up as latency on a GPU / deeper loops, not as raw ms here.)")
 """)
 
 md(r"""
