@@ -43,15 +43,9 @@ md(r"""
 ### Setup (install)
 
 parcae's package pins `numpy<2.0`, which would downgrade Colab's numpy and break
-transformers (binary incompatibility). We avoid touching numpy entirely: install
-parcae **`--no-deps`** (its other deps are training-only — tensorboard/wandb/…) and
-add only the runtime deps, which all accept Colab's existing numpy 2.x. parcae runs
-fine on numpy 2.x.
-
-> If a *previous* run already downgraded/half-upgraded numpy in this runtime, the
-> on-disk numpy is corrupted and pip can't repair it in place — do
-> **Runtime ▸ Disconnect and delete runtime** (a full reset, not just Restart), then
-> run this notebook top-to-bottom on the clean runtime.
+transformers (binary incompatibility). We install parcae **`--no-deps`** (its other
+deps are training-only — tensorboard/wandb/…) and add only the runtime deps, which
+all accept Colab's stock numpy 2.x. parcae runs fine on numpy 2.x.
 """)
 
 code(r"""
