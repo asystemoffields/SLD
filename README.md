@@ -17,16 +17,17 @@ The real test of any looped-LM speedup is whether it preserves a *real* model's
 (recurrence `T=8`) — on **parcae's own evaluations**, head-to-head against the full
 loop (`bench/parcae_lambada.py`, `bench/parcae_nl.py`, `bench/parcae_generate.py`):
 
-**LAMBADA** (`eval_configs/eval-lambada.yaml`, 120 examples, CPU):
+**LAMBADA** (`eval_configs/eval-lambada.yaml`, 300 examples, T4 GPU):
 
-| method | LAMBADA acc | matches full loop | core rounds | CPU ms/ex | speedup |
+| method | LAMBADA acc | matches full loop | core rounds | ms/ex | speedup |
 |---|--:|--:|--:|--:|--:|
-| full loop | 0.500 | — | 8 | 135 | 1.00× |
-| **SLD** | **0.500** | 92.5% | 4.42 | 89.5 | **1.51×** |
-| early-exit | 0.500 | 92.5% | 4.47 | 90.4 | 1.49× |
+| full loop | 0.570 | — | 8.00 | 50.1 | 1.00× |
+| **SLD** | **0.570** | 95% | 4.43 | 34.0 | **1.47×** |
+| early-exit | 0.563 | 95% | 4.50 | 33.9 | 1.47× |
 
-SLD **preserves parcae's benchmark accuracy** (0.500 → 0.500) while cutting the
-recurrence to ~4.4 of 8 core calls **at a real 1.5× CPU wall-clock speedup** — the
+SLD **preserves parcae's benchmark accuracy** (0.570 → 0.570, identical) while cutting
+the recurrence to ~4.4 of 8 core calls **at a real 1.47× GPU wall-clock speedup**
+(1.5× on CPU) — the
 skipped loops become latency because verification is in *state space* (the
 contractive core's last-position state cosine →1; a core step + a dot product, no
 32k-vocab decode), and the readout is paid once. ARC-Easy (a multiple-choice
@@ -41,11 +42,12 @@ generates coherent English and SLD reproduces it:
 ```
 
 **Scope.** This is *near*-lossless on a real continuous-state LM — the accepted token
-matches the full loop on ~92% of positions and benchmark accuracy is preserved, with
-a rare early-accept that can compound over long greedy generation (so generation uses
-a stricter acceptance threshold). The 1.5× is on parcae's short `T=8` loop on CPU; it
-**grows with loop depth** — the single emit-decode amortizes over more skipped core
-calls, so recurrent-depth LMs that unroll 32–132× gain far more.
+matches the full loop on ~95% of positions and benchmark accuracy is preserved
+(identical), with a rare early-accept that can compound over long greedy generation
+(so generation uses a stricter acceptance threshold). The 1.47× is measured on
+parcae's short `T=8` loop on a T4 (1.5× on CPU); it **grows with loop depth** — the
+single emit-decode amortizes over more skipped core calls, so recurrent-depth LMs that
+unroll 32–132× gain far more.
 
 ## Take it to a GPU
 

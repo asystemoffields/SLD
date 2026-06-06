@@ -17,7 +17,17 @@ loop reproduces parcae's native next-token output before reporting anything
 path is `C → coda → ln_f → lm_head·logit_scale`).
 
 **LAMBADA — a benchmark from parcae's own eval configs** (`eval-lambada.yaml`),
-run head-to-head full-loop vs SLD (`bench/parcae_lambada.py`, 120 examples, CPU):
+run head-to-head full-loop vs SLD (`bench/parcae_lambada.py` / the GPU notebook).
+
+T4 GPU, 300 examples:
+
+| method | LAMBADA acc | matches full loop | core rounds | ms/ex | speedup |
+|---|--:|--:|--:|--:|--:|
+| full loop | 0.570 | — | 8.00 | 50.1 | 1.00× |
+| **SLD** | **0.570** | 95% | 4.43 | 34.0 | **1.47×** |
+| early-exit | 0.563 | 95% | 4.50 | 33.9 | 1.47× |
+
+CPU, 120 examples (same method, second hardware target):
 
 | method | LAMBADA acc | matches full loop | core rounds | CPU ms/ex | speedup |
 |---|--:|--:|--:|--:|--:|
@@ -25,9 +35,10 @@ run head-to-head full-loop vs SLD (`bench/parcae_lambada.py`, 120 examples, CPU)
 | **SLD** | **0.500** | 92.5% | 4.42 | 89.5 | **1.51×** |
 | early-exit | 0.500 | 92.5% | 4.47 | 90.4 | 1.49× |
 
-**SLD preserves parcae's benchmark accuracy** (0.500 → 0.500) at ~4.4 of 8 core
-rounds **and a real 1.5× wall-clock speedup on CPU** — the skipped loops convert to
-latency, not just an abstract core-call count.
+**SLD preserves parcae's benchmark accuracy exactly** (0.570 → 0.570 on GPU,
+0.500 → 0.500 on CPU) at ~4.4 of 8 core rounds **and a real ~1.5× wall-clock speedup
+on both hardware targets** — the skipped loops convert to latency, not just an
+abstract core-call count.
 
 Getting there took fixing *two* inefficiencies wholesale, not patching one:
 1. **The readout materialized full-sequence logits.** The next-token decode ran
