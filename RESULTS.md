@@ -17,24 +17,36 @@ loop reproduces parcae's native next-token output before reporting anything
 path is `C → coda → ln_f → lm_head·logit_scale`).
 
 **LAMBADA — a benchmark from parcae's own eval configs** (`eval-lambada.yaml`),
-run head-to-head full-loop vs SLD (`bench/parcae_lambada.py`, 200 examples, CPU):
+run head-to-head full-loop vs SLD (`bench/parcae_lambada.py`, 120 examples, CPU):
 
-| method | LAMBADA acc | matches full loop | core rounds | CPU ms/ex |
-|---|--:|--:|--:|--:|
-| full loop | 0.535 | — | 8 | 181 |
-| **SLD** | **0.535** | 96.5% | 5.25 | 277 |
-| early-exit | 0.520 | 93.0% | 3.68 | 269 |
+| method | LAMBADA acc | matches full loop | core rounds | CPU ms/ex | speedup |
+|---|--:|--:|--:|--:|--:|
+| full loop | 0.500 | — | 8 | 135 | 1.00× |
+| **SLD** | **0.500** | 92.5% | 4.42 | 89.5 | **1.51×** |
+| early-exit | 0.500 | 92.5% | 4.47 | 90.4 | 1.49× |
 
-**SLD preserves parcae's benchmark accuracy** (0.535 → 0.535) at ~5 of 8 core
-rounds, and holds it *more faithfully than the un-verified early-exit baseline*,
-which drops to 0.520 (its halting accepts states SLD's verification rejects).
+**SLD preserves parcae's benchmark accuracy** (0.500 → 0.500) at ~4.4 of 8 core
+rounds **and a real 1.5× wall-clock speedup on CPU** — the skipped loops convert to
+latency, not just an abstract core-call count.
 
-On compute/wall-clock: SLD cuts recurrent core calls (8 → 5.25) and preserves
-accuracy. Whether that shows up as *wall-clock* depends on hardware and loop depth
-— on parcae's short `T=8` loop the per-step verification (a coda+head decode)
-offsets the saved core calls on CPU; the saving converts to **latency on a GPU**
-(each forward is a kernel launch) and **grows with loop depth** (recurrent-depth
-LMs unroll 32–132×).
+Getting there took fixing *two* inefficiencies wholesale, not patching one:
+1. **The readout materialized full-sequence logits.** The next-token decode ran
+   `lm_head` (hidden → 32768) over *every* position and used only the last. Slicing
+   to the last position first is bit-equal and cuts a decode ~3× (it was ~80% of the
+   decode cost). `bench/profile_decode.py` measures this.
+2. **Verification re-decoded every step.** Even cheapened, a decode is ~2× a core
+   step, so token-space verification gave the saved loops straight back (measured
+   0.87× — *slower*). The contractive core converges in *state* space: the
+   last-position state cosine →1 and the readout locks by step ~2 of 8
+   (`bench/trace_convergence.py`). Verifying on that cosine (a core step + a dot
+   product, **no** 32k decode) and decoding **once** to emit is what makes the
+   acceleration net-positive. `bench/sweep_cos.py` calibrates the threshold.
+
+The saving **grows with loop depth** — the single emit-decode is amortized over more
+skipped core calls — so recurrent-depth LMs that unroll 32–132× gain far more. The
+threshold `thr` trades faithfulness for speed: `0.999` preserves benchmark accuracy
+at 1.5×; raise it toward exact (e.g. `0.9999`) for autoregressive generation, where
+small early-accepts compound.
 
 **Real English text (the non-synthetic check).** Using parcae's own tokenizer
 (`SandyResearch/parcae-tokenizer`), `bench/parcae_nl.py` scores parcae on real
@@ -58,8 +70,8 @@ lossless early-exit and SLD are run on the same recurrence:
 "Water is made of"         -> " water molecules. Water molecules are made up of
                                 water, hydrogen, oxygen, carbon, nitrogen, and"
 ```
-SLD reproduces these at ~5.2/8 core rounds per token, **exactly on 3/4 prompts
-(63/80 tokens)**.
+SLD reproduces these at ~6.6/8 core rounds per token (`thr=0.9999`), **exactly on
+3/4 prompts (62/80 tokens)**.
 
 **The boundary (the important part).** Exact losslessness is a
 property of the *synthetic, discrete-readout* task: re-anchoring snaps the carried

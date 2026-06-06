@@ -51,7 +51,7 @@ def main():
     for p in PROMPTS:
         ids0 = tok(p, return_tensors="pt").input_ids
         full_ids, full_r = generate(loop, ids0, N, full_next, T)
-        sld_ids, sld_r = generate(loop, ids0, N, lambda l, i, t: sld(l, i, t, warmup=3, verify_steps=2), T)
+        sld_ids, sld_r = generate(loop, ids0, N, lambda l, i, t: sld(l, i, t, thr=0.9999), T)
         match = torch.equal(full_ids, sld_ids); n_exact += int(match); sldr_all.append(sld_r / N)
         g = full_ids[0][ids0.shape[1]:]; s = sld_ids[0][ids0.shape[1]:]
         tok_match += (g == s).sum().item(); tok_total += g.numel()

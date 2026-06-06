@@ -17,19 +17,21 @@ The real test of any looped-LM speedup is whether it preserves a *real* model's
 (recurrence `T=8`) — on **parcae's own evaluations**, head-to-head against the full
 loop (`bench/parcae_lambada.py`, `bench/parcae_nl.py`, `bench/parcae_generate.py`):
 
-**LAMBADA** (`eval_configs/eval-lambada.yaml`, 200 examples, CPU):
+**LAMBADA** (`eval_configs/eval-lambada.yaml`, 120 examples, CPU):
 
-| method | LAMBADA acc | matches full loop | core rounds | CPU ms/ex |
-|---|--:|--:|--:|--:|
-| full loop | 0.535 | — | 8 | 181 |
-| **SLD** | **0.535** | 96.5% | 5.25 | 277 |
-| early-exit | 0.520 | 93.0% | 3.68 | 269 |
+| method | LAMBADA acc | matches full loop | core rounds | CPU ms/ex | speedup |
+|---|--:|--:|--:|--:|--:|
+| full loop | 0.500 | — | 8 | 135 | 1.00× |
+| **SLD** | **0.500** | 92.5% | 4.42 | 89.5 | **1.51×** |
+| early-exit | 0.500 | 92.5% | 4.47 | 90.4 | 1.49× |
 
-SLD **preserves parcae's benchmark accuracy** (0.535 → 0.535) while cutting the
-recurrence to ~5 of 8 core calls, and holds it *more faithfully than the un-verified
-early-exit baseline*, which drops to 0.520. ARC-Easy (a multiple-choice benchmark)
-shows the same accuracy preservation. And it is **legible** — parcae generates
-coherent English and SLD reproduces it:
+SLD **preserves parcae's benchmark accuracy** (0.500 → 0.500) while cutting the
+recurrence to ~4.4 of 8 core calls **at a real 1.5× CPU wall-clock speedup** — the
+skipped loops become latency because verification is in *state space* (the
+contractive core's last-position state cosine →1; a core step + a dot product, no
+32k-vocab decode), and the readout is paid once. ARC-Easy (a multiple-choice
+benchmark) shows the same accuracy preservation. And it is **legible** — parcae
+generates coherent English and SLD reproduces it:
 
 ```
 "The capital of France is" -> " Paris. It is the capital of the French Republic,
@@ -38,12 +40,12 @@ coherent English and SLD reproduces it:
                                 water, hydrogen, oxygen, carbon, nitrogen, and"
 ```
 
-**Scope.** This is *near*-lossless on a real continuous-state LM — predictions
-are essentially identical per recurrence, with a rare early-accept that can compound
-over long greedy generation. On parcae's short `T=8` loop the per-step verification
-can offset the saved core calls in *CPU wall-clock*; the saving converts to **latency
-on a GPU** (each forward is a kernel launch) and **grows with loop depth** —
-recurrent-depth LMs unroll 32–132×, where the full loop is far more wasteful.
+**Scope.** This is *near*-lossless on a real continuous-state LM — the accepted token
+matches the full loop on ~92% of positions and benchmark accuracy is preserved, with
+a rare early-accept that can compound over long greedy generation (so generation uses
+a stricter acceptance threshold). The 1.5× is on parcae's short `T=8` loop on CPU; it
+**grows with loop depth** — the single emit-decode amortizes over more skipped core
+calls, so recurrent-depth LMs that unroll 32–132× gain far more.
 
 ## Take it to a GPU
 
@@ -61,13 +63,17 @@ logits. SLD:
 1. runs a few real core steps (warm-up);
 2. **extrapolates** the converged state with a vector fixed-point accelerator
    (Aitken / Anderson);
-3. **verifies** the extrapolated state by checking its next-token prediction is
-   stable under a couple more true core steps;
-4. accepts and stops if stable, else keeps looping.
+3. **verifies** the extrapolated state in *state space* — one more true core step
+   that barely moves the last-position state (cosine ≥ `thr`) means the contractive
+   recurrence has settled and the readout has locked. This costs a core step + a dot
+   product; crucially it does **not** decode, so verification doesn't give back the
+   loops it saved;
+4. accepts and decodes **once** to emit if settled, else keeps looping.
 
 The result is identical-or-near-identical to the full loop, at fewer sequential core
-calls. The method is a depth-axis cousin of speculative decoding (verify a cheap
-guess against the true model, fall back when it disagrees).
+calls *and* less wall-clock. The method is a depth-axis cousin of speculative
+decoding (verify a cheap guess against the true model, fall back when it disagrees) —
+here the "cheap check" is moved off the expensive 32k-vocab readout onto the state.
 
 ## Install & run
 

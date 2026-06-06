@@ -40,13 +40,16 @@ class ParcaeLoop:
 
     @torch.no_grad()
     def decode(self, x, ids, fc):
+        """Next-token readout: coda over all positions (a causal stack needs them),
+        but ln_f + lm_head on the LAST position only -- we never read the rest, and
+        the 32k-vocab projection over a full sequence is ~80% of a naive decode."""
         m = self.m
         x = m.transformer.C(x)
         for i, block in enumerate(m.transformer.coda):
             k = str(self.off_coda + i)
             ve = m.value_embeds[k](ids) if k in m.value_embeds else None
             x = block(x, fc, None, ve=ve)
-        x = m.transformer.ln_f(x)
+        x = m.transformer.ln_f(x[:, -1:, :])
         return (m.lm_head(x).float() * self.logit_scale)[:, -1, :]
 
 
@@ -59,45 +62,48 @@ def aitken(a, b, c):  # vector Aitken extrapolation of the fixed point from 3 it
 
 
 @torch.no_grad()
-def sld(loop, ids, T, warmup=3, verify_steps=2):
-    """Verified fixed-point SLD: extrapolate the converged state, accept iff its
-    next token is stable under `verify_steps` more TRUE core steps (a tighter
-    verification -> exact-lossless on a converged loop). Returns (token, rounds)."""
+def lastcos(a, b):  # cosine of the last-position state between two iterates -> [B]
+    return torch.nn.functional.cosine_similarity(a[:, -1], b[:, -1], dim=-1)
+
+
+@torch.no_grad()
+def sld(loop, ids, T, warmup=2, thr=0.999):
+    """Verified fixed-point SLD with STATE-SPACE verification. The recurrent core is
+    contractive: the last-position state converges (cosine -> 1) and the readout
+    locks well before. Warm up, extrapolate the fixed point, and accept once one
+    true core step barely moves the last-position state (cosine >= thr). The check
+    is a core step + a dot product -- no 32k-vocab decode -- so the skipped loops
+    become wall-clock. Decode ONCE, to emit. Returns (token, rounds)."""
     x, e, fc = loop.encode(ids)
     hs = [x]; rounds = 0
     for _ in range(warmup):
         x = loop.step(x, e, fc); hs.append(x); rounds += 1
     while rounds < T:
         s = aitken(hs[-3], hs[-2], hs[-1]) if len(hs) >= 3 else hs[-1]
-        tok_s = loop.decode(s, ids, fc).argmax(-1)
-        cur, stable = s, True
-        for _ in range(verify_steps):                      # verify the token holds under true steps
-            cur = loop.step(cur, e, fc); rounds += 1
-            if (loop.decode(cur, ids, fc).argmax(-1) != tok_s).any():
-                stable = False; break
-        if stable:
-            return tok_s, rounds
-        hs.append(cur)                                     # carry the true step(s) and continue
+        s1 = loop.step(s, e, fc); rounds += 1
+        if (lastcos(s1, s) >= thr).all():
+            return loop.decode(s1, ids, fc).argmax(-1), rounds
+        hs.append(s1)
     return loop.decode(hs[-1], ids, fc).argmax(-1), rounds
 
 
 @torch.no_grad()
-def earlyexit(loop, ids, T, patience=2):
-    """Lossless convergence early-exit on the TRUE iterates (sequential): stop when
-    the next token has been stable for `patience` steps. Returns (token, rounds)."""
+def earlyexit(loop, ids, T, thr=0.999, patience=1):
+    """State-space convergence early-exit on the TRUE iterates: stop once the
+    last-position state stops moving (cosine >= thr for `patience` steps), then
+    decode ONCE. Same convergence signal as SLD, without the extrapolation jump."""
     x, e, fc = loop.encode(ids)
-    prev = None; stable = 0
+    prev = x; stable = 0
     for t in range(1, T + 1):
         x = loop.step(x, e, fc)
-        cur = loop.decode(x, ids, fc).argmax(-1)
-        if prev is not None and (cur == prev).all():
+        if (lastcos(x, prev) >= thr).all():
             stable += 1
             if stable >= patience:
-                return cur, t
+                return loop.decode(x, ids, fc).argmax(-1), t
         else:
             stable = 0
-        prev = cur
-    return prev, T
+        prev = x
+    return loop.decode(x, ids, fc).argmax(-1), T
 
 
 def main():
@@ -140,8 +146,8 @@ def main():
     r_ee, ll_ee, r_sld, ll_sld = [], [], [], []
     for ids in prompts:
         full = m(ids, num_steps_pair=torch.tensor([T, 0]), return_logits=True)["logits"][:, -1, :].argmax(-1)
-        ee_a, ee_r = earlyexit(loop, ids, T, patience=2)
-        sld_a, sld_r = sld(loop, ids, T, warmup=3, verify_steps=2)
+        ee_a, ee_r = earlyexit(loop, ids, T)
+        sld_a, sld_r = sld(loop, ids, T)
         r_ee.append(ee_r); ll_ee.append((ee_a == full).all().item())
         r_sld.append(sld_r); ll_sld.append((sld_a == full).all().item())
     import statistics as st
